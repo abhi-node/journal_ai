@@ -1,0 +1,55 @@
+# Core Framework
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12
+
+# Database
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.10
+alembic==1.14.0
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-decouple==3.8
+bcrypt==4.2.1
+
+# Data Validation & Serialization
+pydantic==2.10.3
+pydantic-settings==2.6.1
+email-validator==2.2.0
+
+# AI/ML Integration
+openai==1.57.0
+
+# AWS Services
+boto3==1.35.77
+botocore==1.35.77
+
+# Caching
+redis==5.2.0
+
+# HTTP Client
+httpx==0.28.0
+
+# Date/Time Handling
+python-dateutil==2.9.0
+
+# CORS is handled by FastAPI's built-in middleware
+
+# Testing (optional for development)
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-cov==6.0.0
+
+# Code Quality (optional for development)
+black==24.10.0
+flake8==7.1.1
+mypy==1.13.0
+pylint==3.3.2
+
+# Monitoring & Logging
+sentry-sdk[fastapi]==2.19.0
+
+# Environment & Configuration
+python-dotenv==1.0.1

@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: journalai_postgres
+    environment:
+      POSTGRES_USER: journalai
+      POSTGRES_PASSWORD: journalai
+      POSTGRES_DB: journalai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - journalai_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U journalai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: journalai_redis
+    ports:
+      - "6379:6379"
+    networks:
+      - journalai_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+
+networks:
+  journalai_network:
+    driver: bridge

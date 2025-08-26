@@ -60,6 +60,7 @@
 ```sql
 - id (UUID, PK)
 - email (VARCHAR, UNIQUE)
+- password_hash (VARCHAR) -- bcrypt/argon2 hashed password
 - name (VARCHAR)
 - created_at (TIMESTAMP)
 - goals (JSONB)

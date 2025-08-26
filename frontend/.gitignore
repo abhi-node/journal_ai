@@ -2,6 +2,7 @@
 
 # dependencies
 node_modules/
+*.gz
 
 # Expo
 .expo/
@@ -35,3 +36,4 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+ios/

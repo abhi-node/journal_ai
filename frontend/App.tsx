@@ -2,7 +2,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Text, View } from 'react-native';
 import { Provider } from 'react-redux';
 import { store } from './src/store';
-import './src/styles/globals.css';
+import './global.css';
 
 export default function App() {
   return (

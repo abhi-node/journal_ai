@@ -1,20 +1,12 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text } from 'react-native';
 
 const StatsScreen = () => {
   return (
-    <View style={styles.container}>
-      <Text>Stats Screen - Progress & XP</Text>
+    <View className="flex-1 justify-center items-center bg-white">
+      <Text className="text-lg font-semibold text-gray-800">Stats Screen - Progress & XP</Text>
     </View>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-});
 
 export default StatsScreen;

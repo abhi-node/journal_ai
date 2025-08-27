@@ -6,6 +6,20 @@ from .user import (
     UserGoals,
     UserStats
 )
+from .note import (
+    Note,
+    NoteCreate,
+    NoteInDB
+)
+from .review import (
+    Review,
+    ReviewCreate,
+    ReviewInDB,
+    ReviewType,
+    EmotionType,
+    DailyReviewContent,
+    WeeklyReviewContent
+)
 
 __all__ = [
     "User",
@@ -13,5 +27,15 @@ __all__ = [
     "UserUpdate",
     "UserInDB",
     "UserGoals",
-    "UserStats"
+    "UserStats",
+    "Note",
+    "NoteCreate",
+    "NoteInDB",
+    "Review",
+    "ReviewCreate",
+    "ReviewInDB",
+    "ReviewType",
+    "EmotionType",
+    "DailyReviewContent",
+    "WeeklyReviewContent"
 ]

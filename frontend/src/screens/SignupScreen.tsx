@@ -83,7 +83,7 @@ const SignupScreen = () => {
     if (isAuthenticated) {
       navigation.reset({
         index: 0,
-        routes: [{ name: 'Home' }],
+        routes: [{ name: 'GoalsSetup' }],
       });
     }
   }, [isAuthenticated, navigation]);

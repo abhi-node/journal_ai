@@ -1,5 +1,6 @@
 from sqlalchemy import Column, String, DateTime, JSON
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
 from app.db.base_class import Base
@@ -25,3 +26,7 @@ class User(Base):
         "streak_days": 0,
         "total_entries": 0
     })
+    
+    notes = relationship("Note", back_populates="user", cascade="all, delete-orphan")
+    reviews = relationship("Review", back_populates="user", cascade="all, delete-orphan")
+    refresh_tokens = relationship("RefreshToken", back_populates="user", cascade="all, delete-orphan")

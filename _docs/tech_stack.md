@@ -117,11 +117,13 @@
 ```json
 {
   "score": 75,
-  "summary": "You had a productive day with significant progress on your fitness goals.",
+  "day_overview": "Started with a 6 AM workout session focusing on cardio and strength training. Had three productive work meetings discussing the Q4 roadmap. Spent lunch catching up with a colleague about career development. Afternoon was dedicated to deep work on the API refactor. Evening included meal prep for the week and quality time with family watching a movie.",
+  "emotional_color": "energized",
   "achievements": [
     "Completed morning workout routine",
+    "Finished API refactor ahead of deadline",
     "Prepared healthy meals for the week",
-    "Had meaningful conversation with partner"
+    "Had meaningful conversation with colleague"
   ],
   "areas_for_improvement": [
     "Missed opportunity to work on side project",
@@ -129,8 +131,8 @@
   ],
   "goal_progress": {
     "health": "Great progress - workout completed, healthy eating maintained",
-    "career": "Limited progress - focused on routine tasks",
-    "relationships": "Good engagement with family"
+    "career": "Strong progress - API refactor completed, networking improved",
+    "relationships": "Good engagement with family and colleagues"
   },
   "tomorrow_recommendations": [
     "Block 2 hours for side project work",
@@ -143,6 +145,29 @@
     "relationships": 25
   }
 }
+```
+
+**Emotional Color Options:**
+Based on emotional intelligence research and Plutchik's Wheel of Emotions, the following emotional states are available:
+
+| Emotion | Color | Hex Code | Description | Icon |
+|---------|-------|----------|-------------|------|
+| **energized** | Orange | #FF7849 | High energy, motivated, ready for action | ⚡ |
+| **happy** | Yellow/Gold | #FFD700 | Joyful, cheerful, positive mood | 😊 |
+| **content** | Green | #36D592 | Satisfied, peaceful, balanced | 😌 |
+| **calm** | Light Blue | #87CEEB | Relaxed, tranquil, at ease | 🧘 |
+| **focused** | Deep Blue | #4169E1 | Concentrated, productive, in the flow | 🎯 |
+| **anxious** | Orange-Red | #FF6B6B | Worried, nervous, uneasy | 😟 |
+| **stressed** | Red | #FF4444 | Overwhelmed, under pressure | 😣 |
+| **sad** | Blue-Purple | #6B5B95 | Down, melancholic, low mood | 😢 |
+| **frustrated** | Dark Red | #DC143C | Irritated, annoyed, blocked | 😤 |
+| **tired** | Gray | #9E9E9E | Exhausted, fatigued, drained | 😴 |
+
+The emotional color appears as:
+- A colored badge beneath the daily review score
+- A subtle border tint on the score card
+- An emoji icon paired with the emotion label
+- Background gradients that reflect the emotional tone
 ```
 
 **Weekly Review Content Format:**

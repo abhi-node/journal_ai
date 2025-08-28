@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout, updateUser } from '../store/slices/authSlice';
@@ -18,6 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { BlurView } from 'expo-blur';
 import { API_CONFIG } from '../config/api';
+import { useFocusEffect } from '@react-navigation/native';
 
 const { width } = Dimensions.get('window');
 
@@ -26,13 +28,14 @@ const ProfileScreen = () => {
   const { user, token } = useSelector((state: RootState) => state.auth);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [dataLoading, setDataLoading] = useState(false);
   
   // Form state
   const [editedName, setEditedName] = useState('');
   const [editedCurrentGoals, setEditedCurrentGoals] = useState('');
   const [editedYearlyGoals, setEditedYearlyGoals] = useState('');
   const [editedTenYearVision, setEditedTenYearVision] = useState('');
-  const [editedPriorityAreas, setEditedPriorityAreas] = useState<string[]>([]);
 
   // Initialize form data from user
   useEffect(() => {
@@ -41,16 +44,48 @@ const ProfileScreen = () => {
       setEditedCurrentGoals(user.goals?.current_goals || '');
       setEditedYearlyGoals(user.goals?.yearly_goals || '');
       setEditedTenYearVision(user.goals?.ten_year_vision || '');
-      setEditedPriorityAreas(Array.isArray(user.goals?.priority_areas) ? user.goals.priority_areas : []);
     }
   }, [user]);
 
-  // Debug token availability
-  useEffect(() => {
-    console.log('ProfileScreen - Token from Redux:', token);
-    console.log('ProfileScreen - Token exists:', !!token);
-    console.log('ProfileScreen - User:', user);
-  }, [token, user]);
+  // Fetch fresh user data
+  const fetchUserData = useCallback(async (showLoader = true) => {
+    if (!token) return;
+    
+    if (showLoader) setDataLoading(true);
+    try {
+      const response = await fetch(`${API_CONFIG.API_BASE}/users/me`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const userData = await response.json();
+        dispatch(updateUser(userData));
+      } else {
+        console.error('Failed to fetch user data:', response.status);
+      }
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+    } finally {
+      setDataLoading(false);
+      setRefreshing(false);
+    }
+  }, [token, dispatch]);
+
+  // Fetch fresh data when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      fetchUserData(false);
+    }, [fetchUserData])
+  );
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchUserData(false);
+  }, [fetchUserData]);
 
   const handleLogout = () => {
     Alert.alert(
@@ -88,7 +123,6 @@ const ProfileScreen = () => {
           current_goals: editedCurrentGoals,
           yearly_goals: editedYearlyGoals,
           ten_year_vision: editedTenYearVision,
-          priority_areas: editedPriorityAreas,
         },
       };
 
@@ -125,26 +159,10 @@ const ProfileScreen = () => {
     setEditedCurrentGoals(user?.goals?.current_goals || '');
     setEditedYearlyGoals(user?.goals?.yearly_goals || '');
     setEditedTenYearVision(user?.goals?.ten_year_vision || '');
-    setEditedPriorityAreas(Array.isArray(user?.goals?.priority_areas) ? user.goals.priority_areas : []);
     setIsEditing(false);
   };
 
-  const togglePriorityArea = (area: string) => {
-    setEditedPriorityAreas(prev => 
-      prev.includes(area) 
-        ? prev.filter(item => item !== area)
-        : [...prev, area]
-    );
-  };
 
-  const priorityOptions = [
-    { id: 'health', label: 'Health & Wellness', color: '#36D592' },
-    { id: 'career', label: 'Career & Growth', color: '#FFD700' },
-    { id: 'relationships', label: 'Relationships', color: '#FF7849' },
-    { id: 'personal', label: 'Personal Development', color: '#B483F0' },
-    { id: 'financial', label: 'Financial Freedom', color: '#4ECDC4' },
-    { id: 'creativity', label: 'Creativity & Hobbies', color: '#FF6B6B' },
-  ];
 
   return (
     <LinearGradient
@@ -154,10 +172,26 @@ const ProfileScreen = () => {
       end={{ x: 1, y: 1 }}
     >
       <SafeAreaView className="flex-1">
+        {dataLoading && !user ? (
+          <View className="flex-1 justify-center items-center">
+            <ActivityIndicator size="large" color="#36D592" />
+            <Text className="text-neutral-mid text-sm mt-2" style={{ fontFamily: 'Poppins-Regular' }}>
+              Loading profile...
+            </Text>
+          </View>
+        ) : (
         <ScrollView 
           className="flex-1"
           showsVerticalScrollIndicator={false}
           contentContainerStyle={{ paddingBottom: 120 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              colors={['#36D592']}
+              tintColor="#36D592"
+            />
+          }
         >
           <View className="px-6">
             {/* Header */}
@@ -240,51 +274,6 @@ const ProfileScreen = () => {
               </View>
             </View>
 
-            {/* Level Card */}
-            {user?.stats && (
-              <View className="mt-6 mb-6">
-                <LinearGradient
-                  colors={['#36D592', '#13BC71']}
-                  style={styles.levelCard}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                >
-                  <View className="flex-row justify-between items-center">
-                    <View>
-                      <Text 
-                        className="text-white/80 text-sm mb-1"
-                        style={{ fontFamily: 'Poppins-Medium' }}
-                      >
-                        Current Level
-                      </Text>
-                      <Text 
-                        className="text-5xl text-white"
-                        style={{ fontFamily: 'Poppins-Bold' }}
-                      >
-                        {user.stats.level || 1}
-                      </Text>
-                      <Text 
-                        className="text-white/70 text-xs mt-1"
-                        style={{ fontFamily: 'Poppins-Regular' }}
-                      >
-                        {user.stats.total_xp || 0} XP earned
-                      </Text>
-                    </View>
-                    <View className="items-center justify-center">
-                      <View className="w-20 h-20 rounded-full bg-white/20 items-center justify-center">
-                        <Svg width="40" height="40" viewBox="0 0 24 24">
-                          <Path
-                            d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
-                            fill="white"
-                            opacity="0.9"
-                          />
-                        </Svg>
-                      </View>
-                    </View>
-                  </View>
-                </LinearGradient>
-              </View>
-            )}
 
             {/* Basic Information Section */}
             <View className="mb-6">
@@ -463,89 +452,6 @@ const ProfileScreen = () => {
                 </View>
               </BlurView>
 
-              {/* Priority Areas */}
-              <BlurView intensity={30} tint="light" style={styles.infoCard}>
-                <View className="p-5">
-                  <View className="flex-row items-center mb-3">
-                    <View className="w-8 h-8 rounded-full bg-pastel-rose-100 items-center justify-center mr-3">
-                      <Svg width="16" height="16" viewBox="0 0 24 24">
-                        <Path d="M7 14l5-5 5 5z" fill="#FF6B6B"/>
-                        <Path d="M12 2L3 21h18L12 2z" stroke="#FF6B6B" strokeWidth="2" fill="none"/>
-                      </Svg>
-                    </View>
-                    <Text 
-                      className="text-neutral-mid text-xs uppercase tracking-wide"
-                      style={{ fontFamily: 'Poppins-SemiBold' }}
-                    >
-                      Priority Areas
-                    </Text>
-                  </View>
-                  {isEditing ? (
-                    <View className="flex-row flex-wrap gap-2">
-                      {priorityOptions.map((option) => {
-                        const isSelected = editedPriorityAreas.includes(option.id);
-                        return (
-                          <TouchableOpacity
-                            key={option.id}
-                            onPress={() => togglePriorityArea(option.id)}
-                            activeOpacity={0.7}
-                            style={[
-                              styles.priorityChip,
-                              isSelected && { backgroundColor: option.color + '20', borderColor: option.color }
-                            ]}
-                          >
-                            <View className="w-4 h-4 rounded-full mr-2" style={{ backgroundColor: option.color }} />
-                            <Text 
-                              style={{ 
-                                fontFamily: isSelected ? 'Poppins-SemiBold' : 'Poppins-Regular',
-                                color: isSelected ? option.color : '#7A7890',
-                                fontSize: 13,
-                              }}
-                            >
-                              {option.label}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  ) : (
-                    <View className="flex-row flex-wrap gap-2">
-                      {Array.isArray(user?.goals?.priority_areas) && user.goals.priority_areas.length > 0 ? (
-                        user.goals.priority_areas.map((area: string, index: number) => {
-                          const option = priorityOptions.find(opt => opt.id === area);
-                          return (
-                            <View
-                              key={index}
-                              style={[
-                                styles.priorityChip,
-                                { backgroundColor: option?.color + '20' || '#36D59220', borderColor: option?.color || '#36D592' }
-                              ]}
-                            >
-                              <View className="w-4 h-4 rounded-full mr-2" style={{ backgroundColor: option?.color || '#36D592' }} />
-                              <Text 
-                                style={{ 
-                                  fontFamily: 'Poppins-Medium',
-                                  color: option?.color || '#36D592',
-                                  fontSize: 13,
-                                }}
-                              >
-                                {option?.label || area.charAt(0).toUpperCase() + area.slice(1).replace('_', ' ')}
-                              </Text>
-                            </View>
-                          );
-                        })
-                      ) : (
-                        <Text 
-                          className="text-neutral-mid text-base"
-                          style={{ fontFamily: 'Poppins-Regular' }}
-                        >
-                          No priority areas set
-                        </Text>
-                      )}
-                    </View>
-                  )}
-                </View>
-              </BlurView>
             </View>
 
             {/* Account Section */}
@@ -620,6 +526,7 @@ const ProfileScreen = () => {
             </View>
           </View>
         </ScrollView>
+        )}
       </SafeAreaView>
     </LinearGradient>
   );

@@ -7,7 +7,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 // Import screens
 import HomeScreen from '../screens/HomeScreen';
 import JournalScreen from '../screens/JournalScreen';
-import StatsScreen from '../screens/StatsScreen';
+import SkillsScreen from '../screens/SkillsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 
 const Tab = createBottomTabNavigator();
@@ -92,16 +92,16 @@ const TabNavigator = () => {
         }}
       />
       <Tab.Screen
-        name="Stats"
-        component={StatsScreen}
+        name="Skills"
+        component={SkillsScreen}
         options={{
           tabBarIcon: ({ color, focused }) => (
             <Svg width="24" height="24" viewBox="0 0 24 24">
               <Path
-                d="M18 20V10M12 20V4M6 20v-6"
+                d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
                 stroke={color}
-                strokeWidth="3"
-                strokeLinecap="round"
+                strokeWidth="2"
+                fill={focused ? color : 'none'}
                 opacity={focused ? 1 : 0.6}
               />
             </Svg>

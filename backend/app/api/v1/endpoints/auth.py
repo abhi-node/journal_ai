@@ -141,7 +141,9 @@ def refresh_token(
         )
     
     # Check if refresh token has expired
-    if refresh_token.expires_at < datetime.now(timezone.utc):
+    # Ensure both datetimes are timezone-aware for comparison
+    expires_at_aware = refresh_token.expires_at.replace(tzinfo=timezone.utc) if refresh_token.expires_at.tzinfo is None else refresh_token.expires_at
+    if expires_at_aware < datetime.now(timezone.utc):
         refresh_token.revoked = True
         db.commit()
         raise HTTPException(

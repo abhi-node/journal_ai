@@ -18,11 +18,7 @@ class User(Base):
     stats = Column(JSON, default=lambda: {
         "level": 1,
         "total_xp": 0,
-        "skill_categories": {
-            "health": {"xp": 0, "level": 1},
-            "career": {"xp": 0, "level": 1},
-            "relationships": {"xp": 0, "level": 1}
-        },
+        "skill_categories": {},
         "streak_days": 0,
         "total_entries": 0
     })

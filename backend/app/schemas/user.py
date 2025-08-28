@@ -9,24 +9,21 @@ class UserGoals(BaseModel):
     current_goals: Optional[str] = None
     yearly_goals: Optional[str] = None
     ten_year_vision: Optional[str] = None
-    priority_areas: List[str] = Field(default_factory=lambda: ["health", "career", "relationships", "personal"])
 
 
 # Skill Category Schema
 class SkillCategory(BaseModel):
     xp: int = 0
     level: int = 1
+    color: str = "#36D592"  # Hex color code
+    icon: str = "🎯"  # Unicode emoji or icon identifier
 
 
 # Stats Schema
 class UserStats(BaseModel):
     level: int = 1
     total_xp: int = 0
-    skill_categories: Dict[str, SkillCategory] = Field(default_factory=lambda: {
-        "health": {"xp": 0, "level": 1},
-        "career": {"xp": 0, "level": 1},
-        "relationships": {"xp": 0, "level": 1}
-    })
+    skill_categories: Dict[str, SkillCategory] = Field(default_factory=dict)
     streak_days: int = 0
     total_entries: int = 0
 

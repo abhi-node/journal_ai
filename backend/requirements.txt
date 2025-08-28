@@ -50,3 +50,7 @@ sentry-sdk[fastapi]==2.19.0
 
 # Environment & Configuration
 python-dotenv==1.0.1
+
+# Task Queue & Caching
+celery[redis]==5.3.4
+redis

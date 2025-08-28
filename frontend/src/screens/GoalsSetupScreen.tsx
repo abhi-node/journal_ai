@@ -31,7 +31,6 @@ const GoalsSetupScreen = () => {
   const [currentGoals, setCurrentGoals] = useState('');
   const [yearlyGoals, setYearlyGoals] = useState('');
   const [tenYearVision, setTenYearVision] = useState('');
-  const [priorityAreas, setPriorityAreas] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   
@@ -40,14 +39,6 @@ const GoalsSetupScreen = () => {
   const progressAnim = useRef(new Animated.Value(0)).current;
   const floatAnim = useRef(new Animated.Value(0)).current;
 
-  const priorityOptions = [
-    { id: 'health', label: 'Health & Wellness', icon: '💪' },
-    { id: 'career', label: 'Career & Growth', icon: '💼' },
-    { id: 'relationships', label: 'Relationships', icon: '❤️' },
-    { id: 'personal', label: 'Personal Development', icon: '🌟' },
-    { id: 'financial', label: 'Financial Freedom', icon: '💰' },
-    { id: 'creativity', label: 'Creativity & Hobbies', icon: '🎨' },
-  ];
 
   useEffect(() => {
     Animated.parallel([
@@ -83,7 +74,7 @@ const GoalsSetupScreen = () => {
 
   useEffect(() => {
     // Update progress bar
-    const progress = currentStep / 4;
+    const progress = currentStep / 3;
     Animated.timing(progressAnim, {
       toValue: progress,
       duration: 300,
@@ -91,16 +82,9 @@ const GoalsSetupScreen = () => {
     }).start();
   }, [currentStep]);
 
-  const togglePriority = (id: string) => {
-    setPriorityAreas(prev => 
-      prev.includes(id) 
-        ? prev.filter(item => item !== id)
-        : [...prev, id]
-    );
-  };
 
   const handleSubmit = async () => {
-    if (!currentGoals || !yearlyGoals || !tenYearVision || priorityAreas.length === 0) {
+    if (!currentGoals || !yearlyGoals || !tenYearVision) {
       return;
     }
 
@@ -116,7 +100,6 @@ const GoalsSetupScreen = () => {
           current_goals: currentGoals,
           yearly_goals: yearlyGoals,
           ten_year_vision: tenYearVision,
-          priority_areas: priorityAreas,
         }),
       });
 
@@ -229,51 +212,6 @@ const GoalsSetupScreen = () => {
             </View>
           </View>
         );
-
-      case 4:
-        return (
-          <View className="flex-1">
-            <Text 
-              className="text-3xl text-neutral-dark mb-3"
-              style={{ fontFamily: 'Poppins-Bold' }}
-            >
-              Priority areas
-            </Text>
-            <Text 
-              className="text-base text-neutral-deep mb-6"
-              style={{ fontFamily: 'Poppins-Regular' }}
-            >
-              Select the areas you want to focus on
-            </Text>
-            <View className="flex-row flex-wrap gap-3">
-              {priorityOptions.map((option) => {
-                const isSelected = priorityAreas.includes(option.id);
-                return (
-                  <TouchableOpacity
-                    key={option.id}
-                    onPress={() => togglePriority(option.id)}
-                    activeOpacity={0.7}
-                    className={`flex-row items-center px-4 py-3 rounded-2xl border-2 ${
-                      isSelected
-                        ? 'bg-pastel-mint-100 border-pastel-mint-400'
-                        : 'bg-white/60 border-neutral-light'
-                    }`}
-                  >
-                    <Text className="text-xl mr-2">{option.icon}</Text>
-                    <Text 
-                      className={`text-sm ${
-                        isSelected ? 'text-pastel-mint-700' : 'text-neutral-deep'
-                      }`}
-                      style={{ fontFamily: isSelected ? 'Poppins-SemiBold' : 'Poppins-Regular' }}
-                    >
-                      {option.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        );
     }
   };
 
@@ -355,13 +293,13 @@ const GoalsSetupScreen = () => {
                     className="text-xs text-neutral-mid"
                     style={{ fontFamily: 'Poppins-Medium' }}
                   >
-                    Step {currentStep} of 4
+                    Step {currentStep} of 3
                   </Text>
                   <Text 
                     className="text-xs text-neutral-mid"
                     style={{ fontFamily: 'Poppins-Medium' }}
                   >
-                    {Math.round((currentStep / 4) * 100)}% Complete
+                    {Math.round((currentStep / 3) * 100)}% Complete
                   </Text>
                 </View>
                 <View className="h-2 bg-neutral-light rounded-full overflow-hidden">
@@ -400,13 +338,12 @@ const GoalsSetupScreen = () => {
                   </TouchableOpacity>
                 )}
 
-                {currentStep < 4 ? (
+                {currentStep < 3 ? (
                   <TouchableOpacity
                     onPress={() => setCurrentStep(currentStep + 1)}
                     disabled={
                       (currentStep === 1 && !currentGoals) ||
-                      (currentStep === 2 && !yearlyGoals) ||
-                      (currentStep === 3 && !tenYearVision)
+                      (currentStep === 2 && !yearlyGoals)
                     }
                     className="flex-1 overflow-hidden rounded-3xl"
                     activeOpacity={0.85}
@@ -414,8 +351,7 @@ const GoalsSetupScreen = () => {
                     <LinearGradient
                       colors={
                         ((currentStep === 1 && !currentGoals) ||
-                         (currentStep === 2 && !yearlyGoals) ||
-                         (currentStep === 3 && !tenYearVision))
+                         (currentStep === 2 && !yearlyGoals))
                           ? ['#E9E5F0', '#E9E5F0']
                           : ['#36D592', '#13BC71']
                       }
@@ -434,13 +370,13 @@ const GoalsSetupScreen = () => {
                 ) : (
                   <TouchableOpacity
                     onPress={handleSubmit}
-                    disabled={loading || priorityAreas.length === 0}
+                    disabled={loading || !tenYearVision}
                     className="flex-1 overflow-hidden rounded-3xl"
                     activeOpacity={0.85}
                   >
                     <LinearGradient
                       colors={
-                        loading || priorityAreas.length === 0
+                        loading || !tenYearVision
                           ? ['#E9E5F0', '#E9E5F0']
                           : ['#36D592', '#13BC71']
                       }

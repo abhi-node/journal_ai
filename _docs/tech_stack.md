@@ -45,6 +45,7 @@
 - **OpenAI API**
   - Whisper API - Voice transcription
   - GPT-4 - Review generation and analysis
+  - GPT-4 Mini - Skill generation based on user goals
   - Embeddings - Semantic search
 
 ### Cloud Services
@@ -72,8 +73,7 @@
 {
   "current_goals": "Text from user about immediate goals",
   "yearly_goals": "Text from user about 1-year vision",
-  "ten_year_vision": "Text from user about 10-year vision",
-  "priority_areas": ["health", "career", "relationships", "personal"]
+  "ten_year_vision": "Text from user about 10-year vision"
 }
 ```
 
@@ -83,14 +83,18 @@
   "level": 1,
   "total_xp": 0,
   "skill_categories": {
-    "health": {"xp": 0, "level": 1},
-    "career": {"xp": 0, "level": 1},
-    "relationships": {"xp": 0, "level": 1}
+    "Skill Name": {
+      "xp": 0,
+      "level": 1,
+      "color": "#36D592",
+      "icon": "🎯"
+    }
   },
   "streak_days": 0,
   "total_entries": 0
 }
 ```
+*Note: skill_categories are dynamically generated based on user goals using AI. Each skill includes XP, level, a color (hex code), and an icon (emoji).*
 
 #### notes
 ```sql
@@ -211,6 +215,30 @@ The emotional color appears as:
 ```
 *Tasks are AI-generated recommendations from reviews. They help users take concrete actions toward their goals.*
 
+## Skill Generation System
+
+The application uses AI to dynamically generate personalized skills based on user goals:
+
+### Initial Skill Generation
+- **When**: During onboarding after user sets their goals
+- **Process**: GPT-4 Mini analyzes current goals, yearly goals, and 10-year vision
+- **Output**: 5-10 relevant skill categories with appropriate colors and icons
+- **Default State**: All skills start at level 1 with 0 XP
+
+### Additional Skill Generation
+- **When**: User updates their profile goals
+- **Process**: AI compares old and new goals to identify new skill areas
+- **Output**: Only new skills are added (never removes existing skills)
+- **State Preservation**: Existing skills retain their XP and levels
+
+### Skill Properties
+Each skill includes:
+- **Name**: Clear, actionable skill category (e.g., "Basketball", "Python Programming")
+- **XP**: Experience points earned through daily reviews
+- **Level**: Current skill level (starts at 1)
+- **Color**: Hex color code for visual representation
+- **Icon**: Emoji icon representing the skill
+
 ## API Structure
 
 ### Endpoints
@@ -235,10 +263,9 @@ The emotional color appears as:
 - `GET /reviews/history` - Get paginated review history
 
 #### Users
-- `GET /users/profile` - Get user profile with goals and stats
-- `PUT /users/goals` - Update user goals
-- `GET /users/stats` - Get current stats and XP
-- `PUT /users/onboarding` - Complete onboarding with initial goals
+- `GET /users/me` - Get current user profile with goals and stats
+- `PUT /users/create_goals` - Create/update user goals and generate initial skills (onboarding)
+- `PUT /users/me` - Update user profile (name and goals, generates additional skills if needed)
 
 #### Tasks
 - `GET /tasks/active` - Get current uncompleted tasks

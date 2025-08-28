@@ -16,7 +16,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.abhi1sk.frontend",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "JournalAI needs access to your microphone to record voice journal entries and transcribe them into text notes."
       }
     },
     "android": {
@@ -24,6 +28,9 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "permissions": [
+        "RECORD_AUDIO"
+      ],
       "edgeToEdgeEnabled": true
     },
     "web": {
@@ -34,6 +41,14 @@
       "eas": {
         "projectId": "5379f6a3-3db8-42f0-bff2-e41bf3304d8a"
       }
-    }
+    },
+    "plugins": [
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow JournalAI to access your microphone."
+        }
+      ]
+    ]
   }
 }

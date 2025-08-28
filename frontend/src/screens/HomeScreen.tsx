@@ -7,12 +7,17 @@ import {
   ScrollView,
   StyleSheet,
   Dimensions,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import AudioWaveform from '../components/AudioWaveform';
+import { useAudioRecording } from '../hooks/useAudioRecording';
+
 const { width, height } = Dimensions.get('window');
 
 const HomeScreen = () => {
@@ -22,6 +27,31 @@ const HomeScreen = () => {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const floatAnim = useRef(new Animated.Value(0)).current;
   const recordButtonScale = useRef(new Animated.Value(1)).current;
+  const modalFadeAnim = useRef(new Animated.Value(0)).current;
+  
+  const [showRecordingModal, setShowRecordingModal] = useState(false);
+  const [currentTranscription, setCurrentTranscription] = useState('');
+  const [noteSaved, setNoteSaved] = useState(false);
+  
+  const {
+    isRecording,
+    isProcessing,
+    transcription,
+    startRecording,
+    stopRecording,
+    recordingDuration,
+  } = useAudioRecording({
+    onTranscriptionComplete: (text) => {
+      setCurrentTranscription(text);
+    },
+    onNoteSaved: (noteId, date) => {
+      setNoteSaved(true);
+      setTimeout(() => setNoteSaved(false), 3000);
+    },
+    onError: (error) => {
+      console.error('Recording error:', error);
+    },
+  });
   
   useEffect(() => {
     // Initial animations
@@ -63,8 +93,24 @@ const HomeScreen = () => {
       ])
     ).start();
   }, []);
+  
+  useEffect(() => {
+    if (showRecordingModal) {
+      Animated.timing(modalFadeAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(modalFadeAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [showRecordingModal]);
 
-  const handleRecordPress = () => {
+  const handleRecordPress = async () => {
     // Animate button press
     Animated.sequence([
       Animated.timing(recordButtonScale, {
@@ -83,7 +129,43 @@ const HomeScreen = () => {
         useNativeDriver: true,
       }),
     ]).start();
+    
+    try {
+      setShowRecordingModal(true);
+      setCurrentTranscription('');
+      await startRecording();
+    } catch (error) {
+      console.error('Error starting recording:', error);
+      setShowRecordingModal(false);
+    }
   };
+  
+  const handleStopRecording = async () => {
+    await stopRecording();
+    // Keep modal open briefly to show processing state
+    // It will close automatically after transcription completes
+  };
+  
+  const handleModalClose = () => {
+    // Handle back button or swipe down
+    if (isRecording) {
+      // Stop recording if active
+      stopRecording();
+    } else if (!isProcessing) {
+      // If not recording or processing, just close the modal
+      setShowRecordingModal(false);
+    }
+  };
+  
+  useEffect(() => {
+    // Close modal when we have a transcription and are not processing
+    if (currentTranscription && !isProcessing && !isRecording) {
+      setTimeout(() => {
+        setShowRecordingModal(false);
+        setCurrentTranscription(''); // Clear transcription for next recording
+      }, 2000);
+    }
+  }, [currentTranscription, isProcessing, isRecording]);
 
   const firstName = user?.name?.split(' ')[0] || 'Friend';
   const currentDate = new Date();
@@ -146,48 +228,49 @@ const HomeScreen = () => {
   ];
 
   return (
-    <LinearGradient
-      colors={['#F0FDF9', '#FAF8FE', '#FFE8DB']}
-      style={{ flex: 1 }}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-    >
-      <SafeAreaView className="flex-1">
-        {/* Background decorative elements */}
-        <View className="absolute inset-0">
-          <Animated.View
-            style={{
-              position: 'absolute',
-              top: 100,
-              right: -60,
-              transform: [{ translateY: floatAnim }],
-              opacity: 0.1,
-            }}
-          >
-            <Svg width="200" height="200" viewBox="0 0 200 200">
-              <Circle cx="100" cy="100" r="80" fill="#36D592" opacity="0.2" />
-            </Svg>
-          </Animated.View>
-          
-          <Animated.View
-            style={{
-              position: 'absolute',
-              bottom: 200,
-              left: -40,
-              transform: [{ translateY: Animated.multiply(floatAnim, -1) }],
-              opacity: 0.1,
-            }}
-          >
-            <Svg width="150" height="150" viewBox="0 0 150 150">
-              <Circle cx="75" cy="75" r="60" fill="#B483F0" opacity="0.2" />
-            </Svg>
-          </Animated.View>
-        </View>
+    <>
+      <LinearGradient
+        colors={['#F0FDF9', '#FAF8FE', '#FFE8DB']}
+        style={{ flex: 1 }}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      >
+        <SafeAreaView className="flex-1">
+          {/* Background decorative elements */}
+          <View className="absolute inset-0">
+            <Animated.View
+              style={{
+                position: 'absolute',
+                top: 100,
+                right: -60,
+                transform: [{ translateY: floatAnim }],
+                opacity: 0.1,
+              }}
+            >
+              <Svg width="200" height="200" viewBox="0 0 200 200">
+                <Circle cx="100" cy="100" r="80" fill="#36D592" opacity="0.2" />
+              </Svg>
+            </Animated.View>
+            
+            <Animated.View
+              style={{
+                position: 'absolute',
+                bottom: 200,
+                left: -40,
+                transform: [{ translateY: Animated.multiply(floatAnim, -1) }],
+                opacity: 0.1,
+              }}
+            >
+              <Svg width="150" height="150" viewBox="0 0 150 150">
+                <Circle cx="75" cy="75" r="60" fill="#B483F0" opacity="0.2" />
+              </Svg>
+            </Animated.View>
+          </View>
 
-        <Animated.View 
-          className="flex-1 px-6"
-          style={{ opacity: fadeAnim }}
-        >
+          <Animated.View 
+            className="flex-1 px-6"
+            style={{ opacity: fadeAnim }}
+          >
             {/* Header */}
             <View className="pt-6 pb-4">
               <Text 
@@ -232,6 +315,7 @@ const HomeScreen = () => {
                   onPress={handleRecordPress}
                   activeOpacity={0.8}
                   className="mb-4"
+                  disabled={isRecording || isProcessing}
                 >
                   <Animated.View
                     style={{
@@ -322,8 +406,129 @@ const HomeScreen = () => {
               </View>
             </View>
           </Animated.View>
-      </SafeAreaView>
-    </LinearGradient>
+        </SafeAreaView>
+      </LinearGradient>
+
+      {/* Recording Modal */}
+      <Modal
+        visible={showRecordingModal}
+        transparent
+        animationType="none"
+        onRequestClose={handleModalClose}
+      >
+        <Animated.View 
+          style={[
+            styles.modalContainer,
+            {
+              opacity: modalFadeAnim,
+            }
+          ]}
+        >
+          <LinearGradient
+            colors={['rgba(240, 253, 249, 0.95)', 'rgba(250, 248, 254, 0.95)', 'rgba(255, 232, 219, 0.95)']}
+            style={styles.modalContent}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+          >
+            <View className="items-center">
+              {isProcessing && !isRecording ? (
+                <>
+                  <ActivityIndicator size="large" color="#36D592" />
+                  <Text 
+                    className="text-neutral-deep mt-4 text-lg"
+                    style={{ fontFamily: 'Poppins-Medium' }}
+                  >
+                    Processing audio...
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text 
+                    className="text-neutral-deep mb-4 text-xl"
+                    style={{ fontFamily: 'Poppins-Bold' }}
+                  >
+                    {isRecording ? 'Recording...' : 'Processing...'}
+                  </Text>
+                  
+                  {/* Duration Display */}
+                  {isRecording && (
+                    <Text 
+                      className="text-neutral-deep mb-4 text-2xl"
+                      style={{ fontFamily: 'Poppins-Medium' }}
+                    >
+                      {recordingDuration}s
+                    </Text>
+                  )}
+                  
+                  {/* Audio Waveform Animation */}
+                  <View className="mb-8">
+                    <AudioWaveform
+                      isActive={isRecording}
+                      isSpeaking={isRecording}
+                      color="#36D592"
+                      width={250}
+                      height={80}
+                    />
+                  </View>
+                  
+                  {/* Transcription Display */}
+                  {currentTranscription ? (
+                    <View className="bg-white/80 rounded-2xl p-4 mb-6 max-h-40">
+                      <ScrollView>
+                        <Text 
+                          className="text-neutral-deep text-sm"
+                          style={{ fontFamily: 'Poppins-Regular' }}
+                        >
+                          {currentTranscription}
+                        </Text>
+                      </ScrollView>
+                    </View>
+                  ) : null}
+                  
+                  {/* Note Saved Indicator */}
+                  {noteSaved && (
+                    <View className="bg-green-100 rounded-full px-4 py-2 mb-6">
+                      <Text 
+                        className="text-green-600 text-sm"
+                        style={{ fontFamily: 'Poppins-Medium' }}
+                      >
+                        ✓ Note saved successfully
+                      </Text>
+                    </View>
+                  )}
+                  
+                  {/* Stop Button */}
+                  <TouchableOpacity
+                    onPress={handleStopRecording}
+                    activeOpacity={0.8}
+                    className="bg-red-500 rounded-full px-8 py-4"
+                    disabled={!isRecording}
+                    style={{ opacity: isRecording ? 1 : 0.5 }}
+                  >
+                    <View className="flex-row items-center">
+                      <View className="w-4 h-4 bg-white rounded-sm mr-2" />
+                      <Text 
+                        className="text-white text-base"
+                        style={{ fontFamily: 'Poppins-SemiBold' }}
+                      >
+                        Stop Recording
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  
+                  <Text 
+                    className="text-neutral-mid text-xs mt-4 text-center px-8"
+                    style={{ fontFamily: 'Poppins-Regular' }}
+                  >
+                    Tap to stop when you're finished speaking
+                  </Text>
+                </>
+              )}
+            </View>
+          </LinearGradient>
+        </Animated.View>
+      </Modal>
+    </>
   );
 };
 
@@ -339,6 +544,24 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 20,
     elevation: 15,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 30,
+    padding: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 25,
+    elevation: 20,
   },
 });
 

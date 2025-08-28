@@ -234,5 +234,4 @@ const authSlice = createSlice({
 });
 
 export const { logout, clearError, updateUser } = authSlice.actions;
-export { refreshAuthToken };
 export default authSlice.reducer;

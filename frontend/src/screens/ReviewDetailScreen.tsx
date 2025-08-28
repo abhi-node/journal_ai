@@ -55,7 +55,7 @@ const ReviewDetailScreen = () => {
   };
 
   const getEmotionConfig = (emotion: string) => {
-    const emotions = {
+    const emotions: Record<string, { color: string; bgColor: string; label: string; icon: string }> = {
       energized: { color: '#FF7849', bgColor: '#FF784920', label: 'Energized', icon: '⚡' },
       happy: { color: '#FFD700', bgColor: '#FFD70020', label: 'Happy', icon: '😊' },
       content: { color: '#36D592', bgColor: '#36D59220', label: 'Content', icon: '😌' },

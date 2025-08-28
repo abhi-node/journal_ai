@@ -511,7 +511,7 @@ const ProfileScreen = () => {
                   ) : (
                     <View className="flex-row flex-wrap gap-2">
                       {Array.isArray(user?.goals?.priority_areas) && user.goals.priority_areas.length > 0 ? (
-                        user.goals.priority_areas.map((area, index) => {
+                        user.goals.priority_areas.map((area: string, index: number) => {
                           const option = priorityOptions.find(opt => opt.id === area);
                           return (
                             <View

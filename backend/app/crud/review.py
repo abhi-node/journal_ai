@@ -80,3 +80,8 @@ def get_review_by_id(db: Session, review_id: UUID, user_id: UUID) -> Optional[Re
             Review.user_id == user_id
         )
     ).first()
+
+
+def get_all_reviews(db: Session) -> List[Review]:
+    """Get all reviews from all users (admin function)"""
+    return db.query(Review).order_by(Review.created_at.desc()).all()

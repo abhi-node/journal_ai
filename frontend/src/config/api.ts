@@ -4,6 +4,11 @@ export const API_CONFIG = {
   get API_BASE() {
     return `${this.BASE_URL}/api/${this.API_VERSION}`;
   },
+  get WS_BASE() {
+    const wsProtocol = this.BASE_URL.startsWith('https') ? 'wss' : 'ws';
+    const wsUrl = this.BASE_URL.replace(/^https?/, wsProtocol);
+    return `${wsUrl}/api/${this.API_VERSION}`;
+  },
   ENDPOINTS: {
     AUTH: {
       LOGIN: '/auth/login',

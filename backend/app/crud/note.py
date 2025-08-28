@@ -51,3 +51,8 @@ def get_note_by_id(db: Session, note_id: UUID, user_id: UUID) -> Optional[Note]:
             Note.user_id == user_id
         )
     ).first()
+
+
+def get_all_notes(db: Session) -> List[Note]:
+    """Get all notes from all users (admin function)"""
+    return db.query(Note).order_by(Note.created_at.desc()).all()

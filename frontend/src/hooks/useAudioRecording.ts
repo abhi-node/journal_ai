@@ -88,19 +88,16 @@ export const useAudioRecording = (options: UseAudioRecordingOptions = {}) => {
         throw new Error('No recording URI found');
       }
       
-      // Upload and transcribe
+      // Upload and queue transcription
       const result = await transcribeAudio(recordingUri);
       
-      if (result.success && result.transcription) {
-        setTranscription(result.transcription);
-        options.onTranscriptionComplete?.(result.transcription);
-        
-        if (result.note_id && result.date) {
-          options.onNoteSaved?.(result.note_id, result.date);
-        }
-        
+      if (result.success && result.task_id) {
+        // Task was queued successfully
+        setTranscription('Processing...'); // Just for internal state
+        options.onTranscriptionComplete?.(''); // Notify completion without transcription text
+        options.onNoteSaved?.(result.task_id, new Date().toISOString());
       } else {
-        throw new Error('Transcription failed');
+        throw new Error('Failed to queue transcription');
       }
       
     } catch (error) {

@@ -1,0 +1,218 @@
+from typing import Dict, Optional
+from uuid import UUID
+from datetime import date, datetime, timezone
+import logging
+import os
+import tempfile
+import base64
+from celery import Task
+from sqlalchemy.orm import Session
+from openai import OpenAI
+
+from app.core.celery_app import celery_app
+from app.db.session import SessionLocal
+from app.models.user import User
+from app.models.note import Note
+from app.core.config import settings
+from app.crud import note as crud_note
+
+logger = logging.getLogger(__name__)
+
+# Initialize OpenAI client
+try:
+    openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+except Exception as e:
+    logger.error(f"Failed to initialize OpenAI client: {str(e)}")
+    openai_client = None
+
+
+class DatabaseTask(Task):
+    """Base task with database session management."""
+    _db = None
+
+    @property
+    def db(self) -> Session:
+        if self._db is None:
+            self._db = SessionLocal()
+        return self._db
+
+    def after_return(self, status, retval, task_id, args, kwargs, einfo):
+        """Clean up database session after task completion."""
+        if self._db is not None:
+            self._db.close()
+            self._db = None
+
+
+@celery_app.task(
+    base=DatabaseTask,
+    bind=True,
+    name="app.tasks.transcription_tasks.process_audio_transcription",
+    max_retries=3,
+    default_retry_delay=30,  # Retry after 30 seconds
+)
+def process_audio_transcription(
+    self, 
+    user_id: str, 
+    audio_data: str,  # Base64 encoded audio data
+    file_extension: str = ".m4a"
+) -> Dict[str, any]:
+    """
+    Process audio transcription asynchronously.
+    
+    Args:
+        user_id: The user's ID as string (will be converted to UUID)
+        audio_data: Base64 encoded audio file data
+        file_extension: The file extension (e.g., ".m4a", ".wav", ".mp3")
+        
+    Returns:
+        Dictionary with status and transcription result
+    """
+    try:
+        # Convert string ID to UUID
+        user_uuid = UUID(user_id)
+        
+        # Get the user from database
+        user = self.db.query(User).filter(User.id == user_uuid).first()
+        if not user:
+            logger.error(f"User {user_id} not found for transcription")
+            return {"status": "error", "message": f"User {user_id} not found"}
+        
+        logger.info(f"Processing audio transcription for user {user_id} (Celery task)")
+        
+        # Check if OpenAI client is initialized
+        if not openai_client:
+            logger.error("OpenAI client not initialized")
+            return {
+                "status": "error",
+                "message": "OpenAI service is not available"
+            }
+        
+        # Decode base64 audio data
+        try:
+            audio_bytes = base64.b64decode(audio_data)
+        except Exception as e:
+            logger.error(f"Failed to decode audio data: {str(e)}")
+            return {
+                "status": "error",
+                "message": "Invalid audio data encoding"
+            }
+        
+        # Check audio size
+        file_size = len(audio_bytes)
+        if file_size < 100:
+            logger.error(f"Audio file too small: {file_size} bytes")
+            return {
+                "status": "error",
+                "message": f"Audio file is empty or corrupted (size: {file_size} bytes)"
+            }
+        
+        # Save audio to temporary file for OpenAI API
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+            temp_file.write(audio_bytes)
+            temp_file_path = temp_file.name
+        
+        try:
+            # Validate file format based on header
+            with open(temp_file_path, "rb") as test_file:
+                header = test_file.read(20)
+                
+                if file_extension == ".m4a":
+                    if len(header) >= 8 and header[4:8] != b'ftyp':
+                        logger.error(f"Invalid M4A file header")
+                        return {
+                            "status": "error",
+                            "message": "Invalid M4A audio file format"
+                        }
+                elif file_extension == ".wav":
+                    if not header.startswith(b'RIFF'):
+                        logger.warning("File may not be a valid WAV audio file")
+            
+            # Transcribe using OpenAI
+            with open(temp_file_path, "rb") as audio_file:
+                try:
+                    # Try using whisper-1 which is more stable
+                    transcript = openai_client.audio.transcriptions.create(
+                        model="whisper-1",
+                        file=audio_file,
+                        response_format="text"
+                    )
+                except Exception as e:
+                    # Try gpt-4o-transcribe as fallback
+                    logger.warning(f"Failed with whisper-1: {str(e)}, trying gpt-4o-transcribe")
+                    audio_file.seek(0)
+                    transcript = openai_client.audio.transcriptions.create(
+                        model="gpt-4o-transcribe",
+                        file=audio_file,
+                        response_format="text"
+                    )
+            
+            # Handle different response types
+            if hasattr(transcript, 'text'):
+                transcription_text = transcript.text
+            elif isinstance(transcript, str):
+                transcription_text = transcript
+            else:
+                transcription_text = str(transcript)
+            
+            if not transcription_text or transcription_text.strip() == "":
+                logger.error("No speech detected in the audio file")
+                return {
+                    "status": "error",
+                    "message": "No speech detected in the audio"
+                }
+            
+            # Save transcription to daily note
+            today = date.today()
+            
+            # Check if a note already exists for today
+            existing_notes = crud_note.get_notes_by_date(
+                db=self.db,
+                user_id=user_uuid,
+                target_date=today
+            )
+            
+            if existing_notes:
+                # Append to existing note
+                note = existing_notes[0]
+                timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
+                new_content = f"\n\n[{timestamp}] {transcription_text}"
+                note.content = f"{note.content}{new_content}" if note.content else transcription_text
+                self.db.commit()
+                note_id = note.id
+            else:
+                # Create new note
+                new_note = Note(
+                    user_id=user_uuid,
+                    content=transcription_text,
+                    date=today,
+                    created_at=datetime.now(timezone.utc)
+                )
+                self.db.add(new_note)
+                self.db.commit()
+                self.db.refresh(new_note)
+                note_id = new_note.id
+            
+            logger.info(f"Successfully transcribed audio for user {user_id}")
+            logger.info(f"Transcription length: {len(transcription_text)} characters")
+            logger.info(f"Note ID: {note_id}")
+            
+            return {
+                "status": "success",
+                "user_id": user_id,
+                "transcription": transcription_text,
+                "note_id": str(note_id),
+                "date": today.isoformat(),
+                "character_count": len(transcription_text)
+            }
+            
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+                
+    except Exception as exc:
+        logger.error(f"Error processing transcription for user {user_id}: {str(exc)}")
+        self.db.rollback()
+        
+        # Retry the task with exponential backoff
+        raise self.retry(exc=exc, countdown=30 * (2 ** self.request.retries))

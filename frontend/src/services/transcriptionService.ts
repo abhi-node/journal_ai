@@ -4,9 +4,9 @@ import * as FileSystem from 'expo-file-system';
 
 export interface TranscriptionResponse {
   success: boolean;
-  transcription: string;
-  note_id: string;
-  date: string;
+  message: string;
+  task_id: string;
+  status: string;
 }
 
 /**

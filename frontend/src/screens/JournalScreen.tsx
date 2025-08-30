@@ -6,7 +6,8 @@ import {
   ScrollView,
   ActivityIndicator,
   FlatList,
-  RefreshControl
+  RefreshControl,
+  Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,6 +24,7 @@ const JournalScreen = () => {
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isGeneratingReview, setIsGeneratingReview] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -75,6 +77,45 @@ const JournalScreen = () => {
     setRefreshing(true);
     await loadData();
     setRefreshing(false);
+  };
+
+  const handleGenerateReview = async () => {
+    setIsGeneratingReview(true);
+    try {
+      const result = await reviewsAPI.generateDailyReview();
+      
+      Alert.alert(
+        'Review Generation Started',
+        'Your daily review is being generated and will appear shortly.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              setTimeout(() => {
+                loadReviews();
+              }, 5000);
+            }
+          }
+        ]
+      );
+      
+      setTimeout(() => {
+        loadReviews();
+      }, 10000);
+      
+    } catch (error: any) {
+      console.error('Error generating review:', error);
+      
+      if (error.message?.includes('409')) {
+        Alert.alert('Review Already Exists', 'A daily review already exists for today.');
+      } else if (error.message?.includes('400')) {
+        Alert.alert('No Notes Found', 'Please add some notes for today before generating a review.');
+      } else {
+        Alert.alert('Error', error.message || 'Failed to generate daily review. Please try again.');
+      }
+    } finally {
+      setIsGeneratingReview(false);
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -386,25 +427,74 @@ const JournalScreen = () => {
                 <EmptyState type="notes" />
               )
             ) : (
-              reviews.length > 0 ? (
-                <FlatList
-                  data={reviews}
-                  renderItem={renderReviewItem}
-                  keyExtractor={(item) => item.id}
-                  showsVerticalScrollIndicator={false}
-                  refreshControl={
-                    <RefreshControl
-                      refreshing={refreshing}
-                      onRefresh={onRefresh}
-                      colors={['#36D592']}
-                      tintColor="#36D592"
-                    />
-                  }
-                  contentContainerStyle={{ paddingBottom: 100 }}
-                />
-              ) : (
-                <EmptyState type="reviews" />
-              )
+              <View className="flex-1">
+                {/* Create Daily Review Button */}
+                <TouchableOpacity
+                  onPress={handleGenerateReview}
+                  disabled={isGeneratingReview}
+                  activeOpacity={0.8}
+                  className="mb-4"
+                >
+                  <LinearGradient
+                    colors={isGeneratingReview ? ['#E5E5E5', '#D0D0D0'] : ['#36D592', '#2BC482']}
+                    style={{ borderRadius: 16, padding: 16 }}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                  >
+                    <View className="flex-row items-center justify-center">
+                      {isGeneratingReview ? (
+                        <>
+                          <ActivityIndicator size="small" color="white" />
+                          <Text 
+                            className="text-white ml-2"
+                            style={{ fontFamily: 'Poppins-SemiBold' }}
+                          >
+                            Generating Review...
+                          </Text>
+                        </>
+                      ) : (
+                        <>
+                          <Svg width="20" height="20" viewBox="0 0 24 24" style={{ marginRight: 8 }}>
+                            <Path
+                              d="M12 5v14M5 12h14"
+                              stroke="white"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </Svg>
+                          <Text 
+                            className="text-white"
+                            style={{ fontFamily: 'Poppins-SemiBold' }}
+                          >
+                            Create Daily Review
+                          </Text>
+                        </>
+                      )}
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+                
+                {reviews.length > 0 ? (
+                  <FlatList
+                    data={reviews}
+                    renderItem={renderReviewItem}
+                    keyExtractor={(item) => item.id}
+                    showsVerticalScrollIndicator={false}
+                    refreshControl={
+                      <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        colors={['#36D592']}
+                        tintColor="#36D592"
+                      />
+                    }
+                    contentContainerStyle={{ paddingBottom: 100 }}
+                  />
+                ) : (
+                  <EmptyState type="reviews" />
+                )}
+              </View>
             )}
           </View>
         </View>

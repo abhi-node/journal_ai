@@ -6,13 +6,13 @@ celery_app = Celery(
     "journalai",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.skill_tasks", "app.tasks.transcription_tasks"]  # Ensure tasks are discovered
+    include=["app.tasks.skill_tasks", "app.tasks.transcription_tasks", "app.tasks.review_tasks"]  # Ensure tasks are discovered
 )
 
 # Configure Celery
 celery_app.conf.update(
     # Task imports
-    imports=["app.tasks.skill_tasks", "app.tasks.transcription_tasks"],
+    imports=["app.tasks.skill_tasks", "app.tasks.transcription_tasks", "app.tasks.review_tasks"],
     # Serialization
     task_serializer="json",
     accept_content=["json"],

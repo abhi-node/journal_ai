@@ -180,7 +180,11 @@ export const reviewsAPI = {
     }
     return apiService.get(url);
   },
-  getReviewById: (reviewId: string) => apiService.get(`/reviews/${reviewId}`)
+  getReviewById: (reviewId: string) => apiService.get(`/reviews/${reviewId}`),
+  generateDailyReview: (date?: string) => {
+    const body = date ? { target_date: date } : {};
+    return apiService.post('/reviews/generate/daily', body);
+  }
 };
 
 export default apiService;

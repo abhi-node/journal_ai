@@ -1,6 +1,6 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from uuid import UUID
 
@@ -9,6 +9,7 @@ from app.api.v1.endpoints.auth import get_current_user
 from app.schemas import Review, ReviewCreate, ReviewType
 from app.schemas.user import User
 from app.crud import review as crud_review
+from app.tasks.review_tasks import generate_daily_review
 
 router = APIRouter()
 
@@ -114,3 +115,65 @@ def get_review(
         raise HTTPException(status_code=404, detail="Review not found")
     
     return review
+
+
+@router.post("/generate/daily", response_model=Dict[str, str])
+def trigger_daily_review_generation(
+    target_date: Optional[date] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger generation of a daily review for the current user.
+    This will queue a Celery task to generate the review asynchronously.
+    
+    Args:
+        target_date: Optional date to generate review for (defaults to today)
+    
+    Returns:
+        Task information including task_id for tracking
+    """
+    from sqlalchemy import and_
+    from app.models.review import Review as ReviewModel
+    
+    review_date = target_date or date.today()
+    
+    existing_review = db.query(ReviewModel).filter(
+        and_(
+            ReviewModel.user_id == current_user.id,
+            ReviewModel.date == review_date,
+            ReviewModel.type == ReviewType.daily
+        )
+    ).first()
+    
+    if existing_review:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Daily review already exists for {review_date}"
+        )
+    
+    from app.models.note import Note
+    notes = db.query(Note).filter(
+        and_(
+            Note.user_id == current_user.id,
+            Note.date == review_date
+        )
+    ).first()
+    
+    if not notes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No notes found for {review_date}. Please add some notes before generating a review."
+        )
+    
+    task = generate_daily_review.delay(
+        user_id=str(current_user.id),
+        target_date=review_date.isoformat()
+    )
+    
+    return {
+        "message": "Daily review generation started",
+        "task_id": task.id,
+        "date": review_date.isoformat(),
+        "status": "processing"
+    }

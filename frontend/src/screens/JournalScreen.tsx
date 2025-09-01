@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { notesAPI, reviewsAPI } from '../services/api';
+import { formatRelativeDate, formatUTCToLocalTime } from '../utils/timezone';
 
 type TabType = 'notes' | 'reviews';
 
@@ -118,32 +119,15 @@ const JournalScreen = () => {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return 'Yesterday';
-    } else {
-      return date.toLocaleDateString('en-US', { 
-        month: 'short',
-        day: 'numeric',
-        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
-      });
-    }
+  const formatDate = (item: any) => {
+    // Use created_at timestamp for accurate date display
+    // Fall back to date field if created_at is not available
+    const timestamp = item.created_at || item.date + 'T00:00:00Z';
+    return formatRelativeDate(timestamp);
   };
 
   const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', { 
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true
-    });
+    return formatUTCToLocalTime(dateString);
   };
 
   const getScoreColor = (score: number) => {
@@ -151,6 +135,29 @@ const JournalScreen = () => {
     if (score >= 60) return '#FFD700';
     if (score >= 40) return '#FF7849';
     return '#FF4444';
+  };
+
+  // Get preview text from note content
+  const getNotePreview = (content: any): string => {
+    if (!content) return 'No content';
+    
+    // Handle JSON structure with entries
+    if (content.entries && Array.isArray(content.entries)) {
+      // Combine all entry contents
+      const allText = content.entries
+        .map((entry: any) => entry.content)
+        .join(' ');
+      
+      // Return first 150 characters as preview
+      return allText.length > 150 ? allText.substring(0, 150) + '...' : allText;
+    }
+    
+    // Handle old string format
+    if (typeof content === 'string') {
+      return content.length > 150 ? content.substring(0, 150) + '...' : content;
+    }
+    
+    return 'No content';
   };
 
   const renderNoteItem = ({ item }: { item: any }) => (
@@ -186,7 +193,7 @@ const JournalScreen = () => {
                 className="text-base text-neutral-dark"
                 style={{ fontFamily: 'Poppins-SemiBold' }}
               >
-                {formatDate(item.date)}
+                {formatDate(item)}
               </Text>
               <Text 
                 className="text-sm text-neutral-mid"
@@ -211,7 +218,7 @@ const JournalScreen = () => {
           numberOfLines={2}
           style={{ fontFamily: 'Poppins-Regular' }}
         >
-          {item.content}
+          {getNotePreview(item.content)}
         </Text>
       </View>
     </TouchableOpacity>
@@ -279,7 +286,7 @@ const JournalScreen = () => {
                   className="text-sm text-neutral-mid"
                   style={{ fontFamily: 'Poppins-Regular' }}
                 >
-                  {formatDate(item.date)}
+                  {formatDate(item)}
                 </Text>
               </View>
             </View>

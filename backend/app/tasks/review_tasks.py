@@ -116,7 +116,20 @@ def generate_daily_review(
                 "message": "No notes found for this date"
             }
         
-        combined_notes = "\n\n".join([note.content for note in notes if note.content])
+        # Extract content from JSON structure
+        combined_notes_parts = []
+        for note in notes:
+            if note.content:
+                # Handle new JSON structure with entries
+                if isinstance(note.content, dict) and 'entries' in note.content:
+                    for entry in note.content['entries']:
+                        if 'content' in entry:
+                            combined_notes_parts.append(entry['content'])
+                # Handle old string format (fallback)
+                elif isinstance(note.content, str):
+                    combined_notes_parts.append(note.content)
+        
+        combined_notes = "\n\n".join(combined_notes_parts)
         
         user_goals = user.goals or {}
         user_stats = user.stats or {}

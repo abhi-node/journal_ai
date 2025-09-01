@@ -1,6 +1,7 @@
 import { API_CONFIG } from '../config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
+import { getUserTimezone } from '../utils/timezone';
 
 export interface TranscriptionResponse {
   success: boolean;
@@ -58,6 +59,10 @@ export async function transcribeAudio(audioUri: string): Promise<TranscriptionRe
       type: type,
       name: filename,
     });
+    
+    // Add user's timezone to the request
+    const userTimezone = getUserTimezone();
+    formData.append('user_timezone', userTimezone);
 
     // Make the API request
     const response = await fetch(`${API_CONFIG.API_BASE}/transcription/transcribe`, {

@@ -18,6 +18,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { BlurView } from 'expo-blur';
+import { formatUTCToLocal } from '../utils/timezone';
 import { API_CONFIG } from '../config/api';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -486,7 +487,7 @@ const ProfileScreen = () => {
                         className="text-neutral-mid text-xs"
                         style={{ fontFamily: 'Poppins-Regular' }}
                       >
-                        {user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { 
+                        {user?.created_at ? formatUTCToLocal(user.created_at, { 
                           month: 'long', 
                           year: 'numeric' 
                         }) : 'Unknown'}

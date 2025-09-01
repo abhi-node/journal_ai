@@ -5,6 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { reviewsAPI } from '../services/api';
+import { formatUTCToLocalDate } from '../utils/timezone';
 
 type RouteParams = {
   ReviewDetail: {
@@ -38,7 +39,21 @@ const ReviewDetailScreen = () => {
   };
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+    // If it's a full timestamp, use it directly
+    if (dateString.includes('T')) {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', { 
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    }
+    
+    // For date-only strings (YYYY-MM-DD), parse components to avoid timezone issues
+    const [year, month, day] = dateString.split('-').map(Number);
+    // Create date in local timezone (month is 0-indexed in JS)
+    const date = new Date(year, month - 1, day);
     return date.toLocaleDateString('en-US', { 
       weekday: 'long',
       year: 'numeric',

@@ -7,6 +7,8 @@ import tempfile
 import base64
 from celery import Task
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy import and_
 from openai import OpenAI
 
 from app.core.celery_app import celery_app
@@ -14,6 +16,11 @@ from app.db.session import SessionLocal
 from app.models.user import User
 from app.models.note import Note
 from app.core.config import settings
+from app.core.timezone_utils import (
+    get_user_current_date,
+    get_day_boundaries_in_utc,
+    get_default_timezone
+)
 from app.crud import note as crud_note
 
 logger = logging.getLogger(__name__)
@@ -54,7 +61,8 @@ def process_audio_transcription(
     self, 
     user_id: str, 
     audio_data: str,  # Base64 encoded audio data
-    file_extension: str = ".m4a"
+    file_extension: str = ".m4a",
+    user_timezone: Optional[str] = None
 ) -> Dict[str, any]:
     """
     Process audio transcription asynchronously.
@@ -63,6 +71,7 @@ def process_audio_transcription(
         user_id: The user's ID as string (will be converted to UUID)
         audio_data: Base64 encoded audio file data
         file_extension: The file extension (e.g., ".m4a", ".wav", ".mp3")
+        user_timezone: User's timezone (e.g., "America/New_York")
         
     Returns:
         Dictionary with status and transcription result
@@ -162,30 +171,67 @@ def process_audio_transcription(
                 }
             
             # Save transcription to daily note
-            today = date.today()
+            # Use user's timezone to determine the correct date
+            if not user_timezone:
+                user_timezone = get_default_timezone()
             
-            # Check if a note already exists for today
-            existing_notes = crud_note.get_notes_by_date(
-                db=self.db,
-                user_id=user_uuid,
-                target_date=today
-            )
+            # Get the current date in user's timezone
+            user_date = get_user_current_date(user_timezone)
             
-            if existing_notes:
-                # Append to existing note
-                note = existing_notes[0]
-                timestamp = datetime.now(timezone.utc).strftime("%H:%M:%S")
-                new_content = f"\n\n[{timestamp}] {transcription_text}"
-                note.content = f"{note.content}{new_content}" if note.content else transcription_text
+            # Get UTC boundaries for the user's day
+            start_utc, end_utc = get_day_boundaries_in_utc(user_date, user_timezone)
+            
+            # Check if a note already exists for this day in user's timezone
+            existing_note = self.db.query(Note).filter(
+                and_(
+                    Note.user_id == user_uuid,
+                    Note.date == user_date
+                )
+            ).first()
+            
+            # Current timestamp in UTC
+            current_utc = datetime.now(timezone.utc)
+            
+            if existing_note:
+                # Append to existing note's JSON structure
+                note = existing_note
+                
+                # Get existing content or initialize
+                content = note.content if note.content else {"entries": []}
+                
+                # Add new entry with UTC timestamp
+                new_entry = {
+                    "timestamp": current_utc.isoformat(),
+                    "content": transcription_text
+                }
+                
+                content["entries"].append(new_entry)
+                note.content = content
+                
+                # Mark the content field as modified for SQLAlchemy to detect the change
+                flag_modified(note, 'content')
+                
                 self.db.commit()
+                self.db.refresh(note)
                 note_id = note.id
+                
+                logger.info(f"Updated existing note with new entry. Total entries: {len(content['entries'])}")
             else:
-                # Create new note
+                # Create new note with JSON structure
+                content = {
+                    "entries": [
+                        {
+                            "timestamp": current_utc.isoformat(),
+                            "content": transcription_text
+                        }
+                    ]
+                }
+                
                 new_note = Note(
                     user_id=user_uuid,
-                    content=transcription_text,
-                    date=today,
-                    created_at=datetime.now(timezone.utc)
+                    content=content,
+                    date=user_date,
+                    created_at=current_utc
                 )
                 self.db.add(new_note)
                 self.db.commit()
@@ -201,8 +247,10 @@ def process_audio_transcription(
                 "user_id": user_id,
                 "transcription": transcription_text,
                 "note_id": str(note_id),
-                "date": today.isoformat(),
-                "character_count": len(transcription_text)
+                "date": user_date.isoformat(),
+                "timestamp": current_utc.isoformat(),
+                "character_count": len(transcription_text),
+                "timezone": user_timezone
             }
             
         finally:

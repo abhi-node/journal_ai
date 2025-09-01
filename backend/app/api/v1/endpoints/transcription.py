@@ -1,6 +1,6 @@
 from typing import Optional
 from datetime import date, datetime, timezone
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, Form
 from sqlalchemy.orm import Session
 from uuid import UUID
 import logging
@@ -32,6 +32,7 @@ except Exception as e:
 @router.post("/transcribe")
 async def transcribe_audio(
     audio: UploadFile = File(...),
+    user_timezone: Optional[str] = Form(None),
     current_user: UserModel = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -40,6 +41,10 @@ async def transcribe_audio(
     
     Accepts audio files in various formats (mp3, wav, m4a, webm, etc.)
     and queues them for async transcription using Celery.
+    
+    Args:
+        audio: Audio file to transcribe
+        user_timezone: User's timezone (e.g., "America/New_York")
     """
     try:
         # Validate file type
@@ -72,11 +77,12 @@ async def transcribe_audio(
         audio_data_base64 = base64.b64encode(content).decode('utf-8')
         
         # Queue transcription task
-        logger.info(f"Queueing transcription task for user {current_user.id}")
+        logger.info(f"Queueing transcription task for user {current_user.id} with timezone {user_timezone}")
         task = process_audio_transcription.delay(
             str(current_user.id),
             audio_data_base64,
-            file_extension
+            file_extension,
+            user_timezone
         )
         logger.info(f"Transcription task queued with ID: {task.id}")
         
@@ -84,7 +90,8 @@ async def transcribe_audio(
             "success": True,
             "message": "Transcription queued successfully",
             "task_id": task.id,
-            "status": "processing"
+            "status": "processing",
+            "timezone": user_timezone or "UTC"
         }
                 
     except HTTPException:

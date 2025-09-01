@@ -3,8 +3,9 @@ import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'rea
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Path, Circle } from 'react-native-svg';
 import { notesAPI } from '../services/api';
+import { formatUTCToLocalTime, formatUTCToLocalDate } from '../utils/timezone';
 
 type RouteParams = {
   NoteDetail: {
@@ -12,6 +13,11 @@ type RouteParams = {
     noteData?: any;
   };
 };
+
+interface NoteEntry {
+  timestamp: string;
+  content: string;
+}
 
 const NoteDetailScreen = () => {
   const navigation = useNavigation();
@@ -38,7 +44,11 @@ const NoteDetailScreen = () => {
   };
 
   const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
+    // Parse the date components to avoid timezone issues
+    // Date string is in format YYYY-MM-DD
+    const [year, month, day] = dateString.split('-').map(Number);
+    // Create date in local timezone (month is 0-indexed in JS)
+    const date = new Date(year, month - 1, day);
     return date.toLocaleDateString('en-US', { 
       weekday: 'long',
       year: 'numeric',
@@ -47,13 +57,52 @@ const NoteDetailScreen = () => {
     });
   };
 
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+  // Parse note entries from JSON structure
+  const getNoteEntries = (): NoteEntry[] => {
+    if (!note || !note.content) return [];
+    
+    // Handle both old string format and new JSON format
+    if (typeof note.content === 'string') {
+      // Old format - single string
+      return [{ timestamp: note.created_at, content: note.content }];
+    } else if (note.content.entries && Array.isArray(note.content.entries)) {
+      // New JSON format with entries array
+      return note.content.entries;
+    }
+    
+    return [];
   };
+
+  const TimelineEntry = ({ entry, isLast }: { entry: NoteEntry; isLast: boolean }) => (
+    <View className="flex-row">
+      {/* Timeline */}
+      <View className="items-center mr-3">
+        <View className="w-3 h-3 bg-primary rounded-full" />
+        {!isLast && <View className="w-0.5 bg-neutral-light flex-1 mt-1" />}
+      </View>
+      
+      {/* Content */}
+      <View className="flex-1 pb-6">
+        {/* Time */}
+        <Text 
+          className="text-primary mb-2"
+          style={{ fontFamily: 'Poppins-SemiBold', fontSize: 14 }}
+        >
+          {formatUTCToLocalTime(entry.timestamp)}
+        </Text>
+        
+        {/* Text */}
+        <View className="bg-white/40 rounded-xl p-4">
+          <Text 
+            className="text-neutral-deep leading-6"
+            style={{ fontFamily: 'Poppins-Regular', fontSize: 15 }}
+          >
+            {entry.content}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
 
   return (
     <LinearGradient
@@ -85,7 +134,7 @@ const NoteDetailScreen = () => {
               className="text-2xl text-neutral-dark flex-1"
               style={{ fontFamily: 'Poppins-Bold' }}
             >
-              Note
+              Daily Note
             </Text>
           </View>
 
@@ -98,9 +147,9 @@ const NoteDetailScreen = () => {
               className="flex-1 px-6"
               showsVerticalScrollIndicator={false}
             >
-              {/* Date and Time Card */}
+              {/* Date Card */}
               <View className="bg-white/60 backdrop-blur rounded-2xl p-4 mb-4 border border-neutral-light">
-                <View className="flex-row items-center mb-2">
+                <View className="flex-row items-center">
                   <View className="w-10 h-10 bg-green-100 rounded-xl items-center justify-center mr-3">
                     <Svg width="20" height="20" viewBox="0 0 24 24">
                       <Path
@@ -112,58 +161,53 @@ const NoteDetailScreen = () => {
                       />
                     </Svg>
                   </View>
-                  <View>
-                    <Text 
-                      className="text-base text-neutral-dark"
-                      style={{ fontFamily: 'Poppins-SemiBold' }}
-                    >
-                      {formatDate(note.date)}
-                    </Text>
-                    <Text 
-                      className="text-sm text-neutral-mid"
-                      style={{ fontFamily: 'Poppins-Regular' }}
-                    >
-                      Recorded at {formatTime(note.created_at)}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Content Card */}
-              <View className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-6 border border-neutral-light">
-                <View className="flex-row items-center mb-4">
-                  <View className="w-8 h-8 bg-purple-100 rounded-lg items-center justify-center mr-3">
-                    <Svg width="18" height="18" viewBox="0 0 24 24">
-                      <Path
-                        d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"
-                        stroke="#B483F0"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        fill="none"
-                      />
-                      <Path
-                        d="M14 2v6h6M16 13H8M16 17H8M10 9H8"
-                        stroke="#B483F0"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </Svg>
-                  </View>
                   <Text 
                     className="text-lg text-neutral-dark"
                     style={{ fontFamily: 'Poppins-SemiBold' }}
                   >
-                    Content
+                    {formatDate(note.date)}
                   </Text>
                 </View>
-                <Text 
-                  className="text-base text-neutral-deep leading-6"
-                  style={{ fontFamily: 'Poppins-Regular' }}
-                >
-                  {note.content}
-                </Text>
+              </View>
+
+              {/* Timeline Entries */}
+              <View className="mb-4">
+                <View className="flex-row items-center mb-4">
+                  <Svg width="20" height="20" viewBox="0 0 24 24" className="mr-2">
+                    <Circle cx="12" cy="12" r="10" stroke="#B483F0" strokeWidth="2" fill="none" />
+                    <Path
+                      d="M12 6v6l4 2"
+                      stroke="#B483F0"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    />
+                  </Svg>
+                  <Text 
+                    className="text-base text-neutral-dark"
+                    style={{ fontFamily: 'Poppins-SemiBold' }}
+                  >
+                    Timeline
+                  </Text>
+                </View>
+
+                <View className="bg-white/30 rounded-2xl p-4 border border-neutral-light">
+                  {getNoteEntries().length > 0 ? (
+                    getNoteEntries().map((entry, index) => (
+                      <TimelineEntry 
+                        key={index} 
+                        entry={entry} 
+                        isLast={index === getNoteEntries().length - 1}
+                      />
+                    ))
+                  ) : (
+                    <Text 
+                      className="text-neutral-mid text-center py-4"
+                      style={{ fontFamily: 'Poppins-Regular' }}
+                    >
+                      No entries recorded yet
+                    </Text>
+                  )}
+                </View>
               </View>
 
               {/* Bottom padding for scroll */}

@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Animated,
   Pressable,
+  TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,9 +21,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import { API_CONFIG } from '../config/api';
 import { theme, elevation } from '../theme';
 import { AnimatedCard } from '../components/ui';
+import RankRoadmapModal from '../components/RankRoadmapModal';
+import { RANKS, getRankInfo, getRankIcon } from '../utils/ranks';
 
 const { width } = Dimensions.get('window');
-const CARD_WIDTH = width - theme.spacing.lg * 2;
+const CARD_WIDTH = width - theme.spacing.md * 2;
 
 const SkillsScreen = () => {
   const dispatch = useDispatch<AppDispatch>();
@@ -30,6 +33,7 @@ const SkillsScreen = () => {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
+  const [showRankModal, setShowRankModal] = useState(false);
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.9)).current;
@@ -38,9 +42,11 @@ const SkillsScreen = () => {
   const userLevel = user?.stats?.level || 1;
   const totalXP = user?.stats?.total_xp || 0;
 
-  const xpForNextLevel = userLevel * 100;
-  const xpProgress = totalXP % xpForNextLevel;
-  const xpProgressPercentage = (xpProgress / xpForNextLevel) * 100;
+  // Linear gap XP system: XP needed for next level = currentLevel * 100
+  const xpForCurrentLevel = 50 * userLevel * (userLevel - 1);
+  const xpForNextLevel = userLevel * 100; // Gap increases by 100 each level
+  const xpProgress = totalXP - xpForCurrentLevel;
+  const xpProgressPercentage = xpForNextLevel > 0 ? (xpProgress / xpForNextLevel) * 100 : 100;
 
   const fetchUserData = useCallback(async (showLoader = true) => {
     if (!token) return;
@@ -124,11 +130,18 @@ const SkillsScreen = () => {
 
   const renderSkillCard = (skillName: string, skillData: any, index: number) => {
     const { xp = 0, level = 1 } = skillData;
-    const skillXpForNext = level * 50;
-    const skillProgress = (xp % skillXpForNext) / skillXpForNext;
+    // Linear gap XP system for skills: same formula as overall level
+    const skillXpForCurrent = 50 * level * (level - 1);
+    const skillXpForNext = level * 100; // Gap increases by 100 each level
+    const skillXpProgress = xp - skillXpForCurrent;
+    const skillProgress = skillXpForNext > 0 ? skillXpProgress / skillXpForNext : 1;
     const color = getSkillColor(skillData);
     const icon = getSkillIcon(skillData);
     const isSelected = selectedSkill === skillName;
+    
+    // Get user's rank color for borders
+    const userRank = getRankInfo(userLevel);
+    const rankColor = userRank?.color || '#B8B5B2';
 
     return (
       <AnimatedCard
@@ -139,17 +152,11 @@ const SkillsScreen = () => {
         style={[
           styles.skillCard,
           { 
+            borderColor: rankColor,
+            borderLeftColor: rankColor,
             width: CARD_WIDTH,
-            borderColor: color, 
-            borderWidth: 2,
-            marginBottom: theme.spacing.md,
-            backgroundColor: theme.colors.surface,
-            padding: 0,
-            overflow: 'hidden',
-            borderLeftWidth: 4,
-            borderLeftColor: color,
           },
-          isSelected && styles.selectedCard,
+          isSelected ? styles.selectedCard : {},
         ]}
         onPress={() => setSelectedSkill(isSelected ? null : skillName)}
       >
@@ -165,8 +172,8 @@ const SkillsScreen = () => {
               <Text style={styles.skillName} numberOfLines={2}>
                 {skillName}
               </Text>
-              <View style={[styles.levelBadge, { backgroundColor: `${color}20`, borderColor: color }]}>
-                <Text style={[styles.levelText, { color }]}>Lv {level}</Text>
+              <View style={[styles.levelBadge, { backgroundColor: `${rankColor}20`, borderColor: rankColor }]}>
+                <Text style={[styles.levelText, { color: rankColor }]}>Lv {level}</Text>
               </View>
             </View>
             
@@ -183,7 +190,7 @@ const SkillsScreen = () => {
                   ]}
                 />
               </View>
-              <Text style={[styles.xpText, { color: theme.colors.text.secondary }]}>+{xp} XP</Text>
+              <Text style={[styles.xpText, { color: theme.colors.text.secondary }]}>{skillXpProgress}/{skillXpForNext} XP</Text>
             </View>
           </View>
         </View>
@@ -204,7 +211,7 @@ const SkillsScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
-        colors={theme.colors.gradients.soft}
+        colors={[theme.colors.background, theme.colors.surface]}
         style={styles.gradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
@@ -234,23 +241,37 @@ const SkillsScreen = () => {
             <Text style={styles.title}>Skills</Text>
             
             {/* Overall Level Card */}
-            <AnimatedCard variant="elevated" style={styles.levelCard}>
+            <TouchableOpacity onPress={() => setShowRankModal(true)} activeOpacity={0.8}>
               <LinearGradient
-                colors={theme.colors.gradients.primary}
-                style={styles.levelGradient}
+                colors={getRankInfo(userLevel)?.special_effect === 'rainbow' 
+                  ? ['#FFD0F0', '#FFE0D0', '#FFFFD0', '#D0FFD0', '#D0F0FF', '#E0D0FF', '#FFD0FF']
+                  : [getRankInfo(userLevel)?.gradient_start || '#B8B5B2', getRankInfo(userLevel)?.gradient_end || '#D0CDCA']
+                }
+                style={styles.levelCard}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >
-                <View style={styles.levelContent}>
-                  <View style={styles.levelInfo}>
-                    <Text style={styles.levelTitle}>Level</Text>
-                    <Text style={styles.levelNumber}>{userLevel}</Text>
+                  <View style={styles.levelContent}>
+                    <View style={styles.levelInfo}>
+                      <Text style={styles.levelTitle}>Level</Text>
+                      <Text style={styles.levelNumber}>{userLevel}</Text>
+                      {getRankInfo(userLevel) && (
+                        <View style={styles.userRankContainer}>
+                          <Text style={styles.userRankIcon}>
+                            {getRankIcon(getRankInfo(userLevel)!.icon_placeholder)}
+                          </Text>
+                          <Text style={styles.userRankName}>
+                            {getRankInfo(userLevel)!.name}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.xpInfo}>
+                      <Text style={styles.xpLabel}>Total XP</Text>
+                      <Text style={styles.xpValue}>{totalXP.toLocaleString()}</Text>
+                      <Text style={styles.tapHint}>Tap to view ranks</Text>
+                    </View>
                   </View>
-                  <View style={styles.xpInfo}>
-                    <Text style={styles.xpLabel}>Total XP</Text>
-                    <Text style={styles.xpValue}>{totalXP}</Text>
-                  </View>
-                </View>
                 
                 {/* XP Progress */}
                 <View style={styles.mainProgressContainer}>
@@ -263,11 +284,11 @@ const SkillsScreen = () => {
                     />
                   </View>
                   <Text style={styles.progressLabel}>
-                    {xpProgress}/{xpForNextLevel} to next level
+                    {Math.max(0, xpProgress)}/{xpForNextLevel} to level {Math.min(userLevel + 1, 999)}
                   </Text>
                 </View>
               </LinearGradient>
-            </AnimatedCard>
+            </TouchableOpacity>
           </Animated.View>
 
           {/* Skills List */}
@@ -288,6 +309,15 @@ const SkillsScreen = () => {
           )}
         </ScrollView>
       </LinearGradient>
+      
+      {/* Rank Roadmap Modal */}
+      <RankRoadmapModal
+        visible={showRankModal}
+        onClose={() => setShowRankModal(false)}
+        currentLevel={userLevel}
+        currentXP={totalXP}
+        ranks={RANKS}
+      />
     </SafeAreaView>
   );
 };
@@ -324,12 +354,10 @@ const styles = StyleSheet.create({
   },
   levelCard: {
     marginBottom: theme.spacing.lg,
-    padding: 0,
-    overflow: 'hidden',
-  },
-  levelGradient: {
     padding: theme.spacing.lg,
-    borderRadius: theme.borderRadius.lg,
+    borderRadius: 20,
+    overflow: 'hidden',
+    ...elevation(3),
   },
   levelContent: {
     flexDirection: 'row',
@@ -387,11 +415,20 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.xs,
   },
   skillsList: {
-    paddingHorizontal: theme.spacing.lg,
+    paddingHorizontal: theme.spacing.md,
   },
   skillCard: {
-    padding: 0,
-    overflow: 'hidden',
+    marginBottom: theme.spacing.lg,
+    backgroundColor: theme.colors.surface,
+    borderWidth: 2,
+    borderLeftWidth: 5,
+    borderRadius: theme.borderRadius.xl,
+    marginHorizontal: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
   },
   selectedCard: {
     transform: [{ scale: 0.98 }],
@@ -399,13 +436,12 @@ const styles = StyleSheet.create({
   cardContentRow: {
     flexDirection: 'row',
     paddingVertical: theme.spacing.lg,
-    paddingLeft: theme.spacing.lg,
-    paddingRight: theme.spacing.xl,
+    paddingHorizontal: theme.spacing.lg,
     alignItems: 'center',
   },
   skillInfo: {
     flex: 1,
-    marginLeft: theme.spacing.lg,
+    marginLeft: theme.spacing.md,
   },
   skillHeader: {
     flexDirection: 'row',
@@ -419,9 +455,9 @@ const styles = StyleSheet.create({
     minHeight: 160,
   },
   iconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: theme.borderRadius.lg,
+    width: 48,
+    height: 48,
+    borderRadius: theme.borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -437,9 +473,9 @@ const styles = StyleSheet.create({
   },
   levelBadge: {
     paddingHorizontal: theme.spacing.md,
-    paddingVertical: 4,
-    borderRadius: theme.borderRadius.sm,
-    borderWidth: 1,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1.5,
   },
   levelText: {
     fontSize: theme.typography.fontSize.xs,
@@ -478,6 +514,28 @@ const styles = StyleSheet.create({
     fontFamily: theme.typography.fontFamily.regular,
     color: theme.colors.text.secondary,
     textAlign: 'center',
+  },
+  userRankContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: theme.spacing.xs,
+  },
+  userRankIcon: {
+    fontSize: 20,
+    marginRight: theme.spacing.xs,
+  },
+  userRankName: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.text.inverse,
+    opacity: 0.95,
+  },
+  tapHint: {
+    fontSize: theme.typography.fontSize.xs,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.inverse,
+    opacity: 0.7,
+    marginTop: 2,
   },
 });
 

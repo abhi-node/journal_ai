@@ -197,11 +197,17 @@ def get_user_stats(db: Session, user_id: UUID) -> Optional[Dict[str, Any]]:
     user_level, xp_in_level, xp_for_next = XPLevelingSystem.calculate_level_from_xp(user_total_xp)
     progress_percentage = XPLevelingSystem.calculate_xp_percentage(user_total_xp)
     
+    # Get user rank information
+    user_rank_info = XPLevelingSystem.get_rank_info(user_level)
+    
     skill_details = {}
     for skill_name, skill_data in stats.get("skill_categories", {}).items():
         skill_xp = skill_data.get("xp", 0)
         skill_level, skill_xp_in_level, skill_xp_for_next = XPLevelingSystem.calculate_level_from_xp(skill_xp)
         skill_progress = XPLevelingSystem.calculate_xp_percentage(skill_xp)
+        
+        # Get skill rank information
+        skill_rank_info = XPLevelingSystem.get_rank_info(skill_level)
         
         skill_details[skill_name] = {
             **skill_data,
@@ -209,12 +215,16 @@ def get_user_stats(db: Session, user_id: UUID) -> Optional[Dict[str, Any]]:
                 "xp_in_current_level": skill_xp_in_level,
                 "xp_for_next_level": skill_xp_for_next,
                 "percentage": skill_progress
-            }
+            },
+            "rank": skill_rank_info["name"] if skill_rank_info else "Novice",
+            "rank_color": skill_rank_info["color"] if skill_rank_info else "#8B8680"
         }
     
     return {
         "user_level": user_level,
         "total_xp": user_total_xp,
+        "rank": user_rank_info["name"] if user_rank_info else "Novice",
+        "rank_info": user_rank_info,
         "progress": {
             "xp_in_current_level": xp_in_level,
             "xp_for_next_level": xp_for_next,

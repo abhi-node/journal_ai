@@ -3,6 +3,7 @@ import { View, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { BlurView } from 'expo-blur';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { theme } from '../theme';
 
 // Import screens
 import HomeScreen from '../screens/HomeScreen';
@@ -18,8 +19,8 @@ const TabNavigator = () => {
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: true,
-        tabBarActiveTintColor: '#36D592',
-        tabBarInactiveTintColor: '#C5BFD3',
+        tabBarActiveTintColor: theme.colors.primary,
+        tabBarInactiveTintColor: theme.colors.text.light,
         tabBarStyle: {
           position: 'absolute',
           backgroundColor: 'transparent',
@@ -39,15 +40,16 @@ const TabNavigator = () => {
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: 'rgba(255,255,255,0.85)',
+              backgroundColor: 'rgba(250,250,250,0.95)',
               borderTopWidth: 1,
-              borderTopColor: 'rgba(197, 191, 211, 0.15)',
+              borderTopColor: theme.colors.accent,
             }}
           />
         ),
         tabBarLabelStyle: {
           fontSize: 12,
           marginTop: 4,
+          fontFamily: theme.typography.fontFamily.regular,
         },
       }}
     >

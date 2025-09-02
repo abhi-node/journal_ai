@@ -52,7 +52,8 @@ class DatabaseTask(Task):
 def generate_daily_review(
     self,
     user_id: str,
-    target_date: str = None
+    target_date: str = None,
+    user_timezone: str = None
 ) -> Dict[str, any]:
     """
     Generate a daily review for a user using AI.
@@ -60,17 +61,22 @@ def generate_daily_review(
     Args:
         user_id: The user's ID as string
         target_date: The date to generate review for (YYYY-MM-DD format), defaults to today
+        user_timezone: The user's timezone string (e.g., "America/New_York")
         
     Returns:
         Dictionary with status and review data
     """
     try:
+        from app.core.timezone_utils import get_user_current_date, get_default_timezone
+        
         user_uuid = UUID(user_id)
         
         if target_date:
             review_date = date.fromisoformat(target_date)
         else:
-            review_date = date.today()
+            # Use user's timezone to determine the current date
+            tz = user_timezone or get_default_timezone()
+            review_date = get_user_current_date(tz)
         
         user = self.db.query(User).filter(User.id == user_uuid).first()
         if not user:

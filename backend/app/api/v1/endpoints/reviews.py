@@ -117,9 +117,15 @@ def get_review(
     return review
 
 
+from pydantic import BaseModel
+
+class GenerateReviewRequest(BaseModel):
+    target_date: Optional[date] = None
+    timezone: Optional[str] = None
+
 @router.post("/generate/daily", response_model=Dict[str, str])
 def trigger_daily_review_generation(
-    target_date: Optional[date] = None,
+    request: GenerateReviewRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -135,8 +141,11 @@ def trigger_daily_review_generation(
     """
     from sqlalchemy import and_
     from app.models.review import Review as ReviewModel
+    from app.core.timezone_utils import get_user_current_date, get_default_timezone
     
-    review_date = target_date or date.today()
+    # Use user's timezone to determine the current date
+    user_timezone = request.timezone or get_default_timezone()
+    review_date = request.target_date or get_user_current_date(user_timezone)
     
     existing_review = db.query(ReviewModel).filter(
         and_(
@@ -168,7 +177,8 @@ def trigger_daily_review_generation(
     
     task = generate_daily_review.delay(
         user_id=str(current_user.id),
-        target_date=review_date.isoformat()
+        target_date=review_date.isoformat(),
+        user_timezone=user_timezone
     )
     
     return {

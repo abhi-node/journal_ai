@@ -2,6 +2,7 @@
 import { API_CONFIG } from '../config/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import authService from './authService';
+import { getUserTimezone } from '../utils/timezone';
 
 class ApiService {
   private baseURL: string;
@@ -182,7 +183,11 @@ export const reviewsAPI = {
   },
   getReviewById: (reviewId: string) => apiService.get(`/reviews/${reviewId}`),
   generateDailyReview: (date?: string) => {
-    const body = date ? { target_date: date } : {};
+    const timezone = getUserTimezone();
+    const body = {
+      timezone,
+      ...(date && { target_date: date })
+    };
     return apiService.post('/reviews/generate/daily', body);
   }
 };

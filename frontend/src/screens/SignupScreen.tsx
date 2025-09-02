@@ -19,6 +19,7 @@ import { AppDispatch, RootState } from '../store';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Circle, Rect } from 'react-native-svg';
+import { theme } from '../theme';
 
 const { width } = Dimensions.get('window');
 
@@ -173,10 +174,10 @@ const SignupScreen = () => {
 
   return (
     <LinearGradient
-      colors={['#F0FDF9', '#FAF8FE', '#FFE8DB']}
+      colors={theme.colors.gradients.soft}
       style={{ flex: 1 }}
       start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
+      end={{ x: 0, y: 1 }}
     >
       <SafeAreaView className="flex-1">
         {/* Background decorative elements */}
@@ -248,7 +249,7 @@ const SignupScreen = () => {
                   activeOpacity={0.7}
                 >
                   <LinearGradient
-                    colors={['#36D592', '#13BC71']}
+                    colors={theme.colors.gradients.primary}
                     style={styles.backButton}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
@@ -443,7 +444,7 @@ const SignupScreen = () => {
                     className="overflow-hidden rounded-3xl mb-6"
                   >
                     <LinearGradient
-                      colors={loading ? ['#E9E5F0', '#E9E5F0'] : ['#36D592', '#13BC71']}
+                      colors={loading ? [theme.colors.accent, theme.colors.accent] : theme.colors.gradients.primary}
                       style={styles.signupButton}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 0 }}

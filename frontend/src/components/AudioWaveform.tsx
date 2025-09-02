@@ -10,10 +10,12 @@ import Animated, {
   Easing,
   interpolate,
 } from 'react-native-reanimated';
+import { theme } from '../theme';
 
 interface AudioWaveformProps {
-  isActive: boolean;
-  isSpeaking: boolean;
+  isActive?: boolean;
+  isRecording?: boolean;
+  isSpeaking?: boolean;
   color?: string;
   barCount?: number;
   width?: number;
@@ -22,18 +24,21 @@ interface AudioWaveformProps {
 
 const AudioWaveform: React.FC<AudioWaveformProps> = ({
   isActive,
+  isRecording,
   isSpeaking,
-  color = '#36D592',
+  color = theme.colors.primary,
   barCount = 5,
   width = 200,
-  height = 60,
+  height = 40,
 }) => {
+  // Use isRecording if provided, otherwise fall back to isActive
+  const isAnimating = isRecording !== undefined ? isRecording : isActive;
   const animations = useRef(
     Array.from({ length: barCount }, () => useSharedValue(0.3))
   ).current;
 
   useEffect(() => {
-    if (isActive && isSpeaking) {
+    if (isAnimating && isSpeaking) {
       // Start animations with different delays for each bar
       animations.forEach((animation, index) => {
         animation.value = withRepeat(
@@ -54,7 +59,7 @@ const AudioWaveform: React.FC<AudioWaveformProps> = ({
           false
         );
       });
-    } else if (isActive && !isSpeaking) {
+    } else if (isAnimating && !isSpeaking) {
       // Gentle idle animation when recording but not speaking
       animations.forEach((animation, index) => {
         animation.value = withRepeat(
@@ -84,7 +89,7 @@ const AudioWaveform: React.FC<AudioWaveformProps> = ({
         });
       });
     }
-  }, [isActive, isSpeaking, animations]);
+  }, [isAnimating, isSpeaking, animations]);
 
   const barWidth = width / (barCount * 2 - 1);
 
@@ -136,7 +141,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bar: {
-    borderRadius: 3,
+    borderRadius: 100,  // Make them circular
   },
 });
 

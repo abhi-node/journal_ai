@@ -16,6 +16,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import AudioWaveform from '../components/AudioWaveform';
 import { useAudioRecording } from '../hooks/useAudioRecording';
+import { theme, elevation } from '../theme';
+import { AnimatedCard, FloatingElement } from '../components/ui';
 
 const { width, height } = Dimensions.get('window');
 
@@ -24,7 +26,6 @@ const HomeScreen = () => {
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const floatAnim = useRef(new Animated.Value(0)).current;
   const recordButtonScale = useRef(new Animated.Value(1)).current;
   const recordingIndicatorAnim = useRef(new Animated.Value(0)).current;
   const rippleAnim = useRef(new Animated.Value(0)).current;
@@ -48,510 +49,399 @@ const HomeScreen = () => {
     recordingDuration,
   } = useAudioRecording({
     onTranscriptionComplete: () => {
-      showStatus('Saved successfully');
+      showStatus('Note saved successfully');
     },
-    onNoteSaved: () => {
-      // Additional confirmation
-    },
-    onError: (error) => {
-      showStatus('Failed to save');
-      console.error('Recording error:', error);
-    },
+    onTranscriptionError: () => {
+      showStatus('Failed to save note');
+    }
   });
-  
-  useEffect(() => {
-    // Clean up any existing animations first
-    animationCleanupRef.current.forEach(cleanup => cleanup());
-    animationCleanupRef.current = [];
-    
-    // Initial fade in sequence
-    const fadeInSequence = Animated.stagger(200, [
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-      Animated.timing(welcomeAnim, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-      Animated.timing(instructionAnim, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-    ]);
-    fadeInSequence.start();
-    
-    // Setup pulse animation with proper cleanup
-    const setupPulseAnimation = () => {
-      if (pulseAnimationRef.current) {
-        pulseAnimationRef.current.stop();
-      }
-      
-      pulseAnimationRef.current = Animated.loop(
-        Animated.sequence([
-          Animated.timing(pulseAnim, {
-            toValue: 1.03,
-            duration: 2000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(pulseAnim, {
-            toValue: 1,
-            duration: 2000,
-            useNativeDriver: true,
-          }),
-        ])
-      );
-      pulseAnimationRef.current.start();
-    };
-    
-    // Start pulse after a delay
-    const pulseTimeout = setTimeout(() => {
-      if (!isHolding) {
-        setupPulseAnimation();
-      }
-    }, 800);
 
-    // Float animation for background elements
-    const floatAnimation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(floatAnim, {
-          toValue: -15,
-          duration: 3000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(floatAnim, {
-          toValue: 0,
-          duration: 3000,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    floatAnimation.start();
-
-    // Store cleanup functions
-    animationCleanupRef.current = [
-      () => {
-        pulseAnimationRef.current?.stop();
-        floatAnimation.stop();
-        clearTimeout(pulseTimeout);
-      }
-    ];
-
-    return () => {
-      animationCleanupRef.current.forEach(cleanup => cleanup());
-    };
-  }, []);
-  
-  const showStatus = (message: string) => {
+  const showStatus = useCallback((message: string) => {
     setStatusMessage(message);
     setShowStatusMessage(true);
     
     Animated.sequence([
-      Animated.timing(statusMessageAnim, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: true,
-      }),
+      Animated.parallel([
+        Animated.timing(statusMessageAnim, {
+          toValue: 1,
+          duration: theme.animation.duration.normal,
+          useNativeDriver: true,
+        }),
+      ]),
       Animated.delay(2000),
       Animated.timing(statusMessageAnim, {
         toValue: 0,
-        duration: 300,
+        duration: theme.animation.duration.fast,
         useNativeDriver: true,
       }),
     ]).start(() => {
       setShowStatusMessage(false);
-      setStatusMessage('');
     });
+  }, [statusMessageAnim]);
+
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
-  
-  const startRecordingAnimation = useCallback(() => {
-    // Stop pulse animation safely
-    if (pulseAnimationRef.current) {
-      pulseAnimationRef.current.stop();
-      pulseAnimationRef.current = null;
-    }
+
+  useEffect(() => {
+    const animations = [];
     
-    // Reset values before starting
-    recordButtonScale.setValue(1);
-    rippleAnim.setValue(0);
-    rippleOpacity.setValue(0.3);
+    // Welcome animation
+    const welcomeAnimation = Animated.sequence([
+      Animated.delay(100),
+      Animated.spring(welcomeAnim, {
+        toValue: 1,
+        tension: 20,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+    ]);
     
-    // Scale up button
+    // Instruction animation
+    const instructionAnimation = Animated.sequence([
+      Animated.delay(400),
+      Animated.timing(instructionAnim, {
+        toValue: 1,
+        duration: theme.animation.duration.slow,
+        useNativeDriver: true,
+      }),
+    ]);
+    
+    // Fade in animation
+    const fadeAnimation = Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: theme.animation.duration.slow,
+      delay: 600,
+      useNativeDriver: true,
+    });
+    
+    // Pulse animation
+    const createPulseAnimation = () => {
+      const animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.05,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseAnimationRef.current = animation;
+      return animation;
+    };
+    
+    Animated.parallel([
+      welcomeAnimation,
+      instructionAnimation,
+      fadeAnimation,
+      createPulseAnimation(),
+    ]).start();
+    
+    return () => {
+      pulseAnimationRef.current?.stop();
+      rippleAnimationRef.current?.stop();
+      animationCleanupRef.current.forEach(cleanup => cleanup());
+    };
+  }, []);
+
+  const handlePressIn = useCallback(() => {
+    setIsHolding(true);
+    startRecording();
+    Vibration.vibrate(10);
+    
+    // Stop pulse animation
+    pulseAnimationRef.current?.stop();
+    
+    // Scale animation
     Animated.spring(recordButtonScale, {
-      toValue: 1.1,
-      friction: 3,
-      tension: 40,
+      toValue: 0.9,
+      tension: 100,
+      friction: 10,
       useNativeDriver: true,
     }).start();
     
-    // Start ripple effect with proper cleanup
-    if (rippleAnimationRef.current) {
-      rippleAnimationRef.current.stop();
-    }
+    // Recording indicator animation
+    Animated.timing(recordingIndicatorAnim, {
+      toValue: 1,
+      duration: theme.animation.duration.fast,
+      useNativeDriver: true,
+    }).start();
     
-    rippleAnimationRef.current = Animated.loop(
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(rippleAnim, {
-            toValue: 2.5,
-            duration: 2000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(rippleOpacity, {
-            toValue: 0,
-            duration: 2000,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.parallel([
-          Animated.timing(rippleAnim, {
-            toValue: 0,
-            duration: 0,
-            useNativeDriver: true,
-          }),
+    // Ripple animation
+    const rippleAnimation = Animated.loop(
+      Animated.parallel([
+        Animated.timing(rippleAnim, {
+          toValue: 2,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+        Animated.sequence([
           Animated.timing(rippleOpacity, {
             toValue: 0.3,
-            duration: 0,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+          Animated.timing(rippleOpacity, {
+            toValue: 0,
+            duration: 1200,
             useNativeDriver: true,
           }),
         ]),
       ])
     );
-    rippleAnimationRef.current.start();
     
-    // Fade in recording indicator
-    Animated.timing(recordingIndicatorAnim, {
-      toValue: 1,
-      duration: 300,
-      useNativeDriver: true,
-    }).start();
-  }, [recordButtonScale, rippleAnim, rippleOpacity, recordingIndicatorAnim]);
-  
-  const stopRecordingAnimation = useCallback(() => {
-    // Scale back button
-    Animated.spring(recordButtonScale, {
-      toValue: 1,
-      friction: 3,
-      tension: 40,
-      useNativeDriver: true,
-    }).start();
+    rippleAnimationRef.current = rippleAnimation;
+    rippleAnimation.start();
+  }, [startRecording]);
+
+  const handlePressOut = useCallback(() => {
+    if (!isHolding) return;
     
-    // Stop and reset ripple safely
-    if (rippleAnimationRef.current) {
-      rippleAnimationRef.current.stop();
-      rippleAnimationRef.current = null;
-    }
+    setIsHolding(false);
+    stopRecording();
+    Vibration.vibrate(10);
     
+    // Stop ripple animation
+    rippleAnimationRef.current?.stop();
+    
+    // Reset animations
     Animated.parallel([
+      Animated.spring(recordButtonScale, {
+        toValue: 1,
+        tension: 20,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+      Animated.timing(recordingIndicatorAnim, {
+        toValue: 0,
+        duration: theme.animation.duration.fast,
+        useNativeDriver: true,
+      }),
       Animated.timing(rippleAnim, {
         toValue: 0,
-        duration: 200,
+        duration: theme.animation.duration.fast,
         useNativeDriver: true,
       }),
       Animated.timing(rippleOpacity, {
         toValue: 0,
-        duration: 200,
+        duration: theme.animation.duration.fast,
         useNativeDriver: true,
       }),
-    ]).start();
-    
-    // Fade out recording indicator
-    Animated.timing(recordingIndicatorAnim, {
-      toValue: 0,
-      duration: 200,
-      useNativeDriver: true,
-    }).start();
-    
-    // Restart pulse animation with proper check
-    const restartTimeout = setTimeout(() => {
-      if (!isHolding && !pulseAnimationRef.current) {
-        pulseAnimationRef.current = Animated.loop(
-          Animated.sequence([
-            Animated.timing(pulseAnim, {
-              toValue: 1.03,
-              duration: 2000,
-              useNativeDriver: true,
-            }),
-            Animated.timing(pulseAnim, {
-              toValue: 1,
-              duration: 2000,
-              useNativeDriver: true,
-            }),
-          ])
-        );
-        pulseAnimationRef.current.start();
-      }
-    }, 500);
-    
-    // Store timeout for cleanup
-    animationCleanupRef.current.push(() => clearTimeout(restartTimeout));
-  }, [recordButtonScale, rippleAnim, rippleOpacity, recordingIndicatorAnim, pulseAnim, isHolding]);
-
-  const handlePressIn = async () => {
-    setIsHolding(true);
-    Vibration.vibrate(10);
-    
-    try {
-      await startRecording();
-      startRecordingAnimation();
-    } catch (error) {
-      console.error('Error starting recording:', error);
-      setIsHolding(false);
-      showStatus('Failed to start');
-    }
-  };
-  
-  const handlePressOut = async () => {
-    if (!isHolding || !isRecording) return;
-    
-    setIsHolding(false);
-    Vibration.vibrate(10);
-    stopRecordingAnimation();
-    
-    try {
-      await stopRecording();
-    } catch (error) {
-      console.error('Error stopping recording:', error);
-      showStatus('Failed to save');
-    }
-  };
-
-  const firstName = user?.name?.split(' ')[0] || 'there';
-  const currentHour = new Date().getHours();
-  const greeting = currentHour < 12 ? 'Good morning' : currentHour < 18 ? 'Good afternoon' : 'Good evening';
-  const timeOfDay = currentHour < 12 ? 'morning' : currentHour < 18 ? 'afternoon' : 'evening';
+    ]).start(() => {
+      // Restart pulse animation
+      const pulseAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.05,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseAnimationRef.current = pulseAnimation;
+      pulseAnimation.start();
+    });
+  }, [isHolding, stopRecording]);
 
   return (
-    <LinearGradient
-      colors={['#F0FDF9', '#FAF8FE', '#FFE8DB']}
-      style={{ flex: 1 }}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-    >
-      <SafeAreaView className="flex-1">
-        {/* Subtle Background Elements */}
-        <View className="absolute inset-0" pointerEvents="none">
-          <Animated.View
-            style={{
-              position: 'absolute',
-              top: height * 0.15,
-              right: -80,
-              transform: [{ translateY: floatAnim }],
-              opacity: 0.05,
-            }}
-          >
-            <Svg width="250" height="250" viewBox="0 0 200 200">
-              <Circle cx="100" cy="100" r="80" fill="#36D592" />
-            </Svg>
-          </Animated.View>
+    <SafeAreaView style={styles.container}>
+      <LinearGradient
+        colors={theme.colors.gradients.soft}
+        style={styles.gradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+      >
+        <Animated.View style={styles.content}>
+          {/* Header Section */}
+          <View style={styles.header}>
+            <Animated.View 
+              style={[
+                styles.welcomeContainer,
+                {
+                  opacity: welcomeAnim,
+                  transform: [{
+                    scale: welcomeAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.8, 1]
+                    })
+                  }]
+                }
+              ]}
+            >
+              <AnimatedCard 
+                variant="flat" 
+                style={styles.welcomeCard}
+                animationType="fade"
+              >
+                <Text style={styles.greeting}>
+                  Welcome back
+                </Text>
+                <Text style={styles.userName}>
+                  {user?.first_name || user?.name || user?.username || 'Friend'}
+                </Text>
+              </AnimatedCard>
+            </Animated.View>
+          </View>
           
-          <Animated.View
-            style={{
-              position: 'absolute',
-              bottom: height * 0.2,
-              left: -60,
-              transform: [{ translateY: Animated.multiply(floatAnim, -1) }],
-              opacity: 0.05,
-            }}
-          >
-            <Svg width="200" height="200" viewBox="0 0 150 150">
-              <Circle cx="75" cy="75" r="60" fill="#B483F0" />
-            </Svg>
-          </Animated.View>
-        </View>
-
-        <Animated.View 
-          className="flex-1"
-          style={{ opacity: fadeAnim }}
-        >
-          {/* Main Content Area - Centered */}
-          <View className="flex-1 justify-center items-center px-6">
-            {/* Welcome Section */}
+          {/* Main Recording Section */}
+          <View style={styles.mainSection}>
+            {/* Recording Indicator */}
+            {isHolding && (
+              <Animated.View
+                style={[
+                  styles.recordingIndicator,
+                  {
+                    opacity: recordingIndicatorAnim,
+                    transform: [
+                      {
+                        translateY: recordingIndicatorAnim.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [-10, 0],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                <AnimatedCard variant="elevated" style={styles.recordingCard}>
+                  <View style={styles.recordingDot} />
+                  <Text style={styles.recordingText}>
+                    Recording {formatDuration(recordingDuration)}
+                  </Text>
+                </AnimatedCard>
+              </Animated.View>
+            )}
+            
+            {/* Waveform */}
+            {isRecording && (
+              <View style={styles.waveformContainer}>
+                <AudioWaveform isRecording={isRecording} />
+              </View>
+            )}
+            
+            {/* Instruction */}
             <Animated.View 
-              className="items-center mb-8"
-              style={{ 
-                opacity: welcomeAnim,
-                transform: [{
-                  translateY: welcomeAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [20, 0]
-                  })
-                }]
-              }}
+              style={[
+                styles.instructionContainer,
+                { 
+                  opacity: instructionAnim,
+                  transform: [{
+                    translateY: instructionAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [10, 0]
+                    })
+                  }]
+                }
+              ]}
             >
-              <Text 
-                className="text-3xl text-neutral-dark mb-2 text-center"
-                style={{ fontFamily: 'Poppins-Bold' }}
-              >
-                Welcome back, {firstName}
-              </Text>
-              <Text 
-                className="text-lg text-neutral-dark/60 text-center"
-                style={{ fontFamily: 'Poppins-Regular' }}
-              >
-                {greeting}
+              <Text style={styles.instruction}>
+                Hold to record
               </Text>
             </Animated.View>
 
-            {/* Simple Instructions */}
-            <Animated.View 
-              className="mb-10"
-              style={{ 
-                opacity: instructionAnim,
-                transform: [{
-                  translateY: instructionAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [10, 0]
-                  })
-                }]
-              }}
-            >
-              <Text 
-                className="text-center text-neutral-dark/50 text-sm"
-                style={{ fontFamily: 'Poppins-Regular' }}
+            {/* Recording Button */}
+            <View style={styles.buttonContainer}>
+              {/* Ripple Effect */}
+              <Animated.View
+                style={[
+                  styles.ripple,
+                  {
+                    transform: [{ scale: rippleAnim }],
+                    opacity: rippleOpacity,
+                  }
+                ]}
+              />
+              
+              {/* Main Record Button */}
+              <Pressable
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+                delayLongPress={0}
+                disabled={isProcessing}
+                style={({ pressed }) => [
+                  {
+                    opacity: pressed ? 0.95 : 1,
+                  }
+                ]}
               >
-                Hold the button to record • Release to save
-              </Text>
-            </Animated.View>
-
-            {/* Recording Button Section */}
-            <View className="items-center">
-              {/* Recording Button Container */}
-              <View className="items-center justify-center mb-8">
-                {/* Ripple Effect */}
                 <Animated.View
-                  style={[
-                    styles.ripple,
-                    {
-                      transform: [{ scale: rippleAnim }],
-                      opacity: rippleOpacity,
-                    }
-                  ]}
-                />
-                
-                {/* Main Record Button */}
-                <Pressable
-                  onPressIn={handlePressIn}
-                  onPressOut={handlePressOut}
-                  delayLongPress={0}
-                  disabled={isProcessing}
-                  style={({ pressed }) => [
-                    {
-                      opacity: pressed ? 0.95 : 1,
-                    }
-                  ]}
+                  style={{
+                    transform: [{ 
+                      scale: isHolding ? recordButtonScale : pulseAnim 
+                    }],
+                  }}
                 >
-                  <Animated.View
-                    style={{
-                      transform: [{ 
-                        scale: isHolding ? recordButtonScale : pulseAnim 
-                      }],
-                    }}
+                  <LinearGradient
+                    colors={isHolding ? 
+                      [theme.colors.error, '#D68080'] : 
+                      [theme.colors.primary, theme.colors.secondary]
+                    }
+                    style={styles.recordButton}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
                   >
-                    <LinearGradient
-                      colors={isHolding ? ['#FF6B6B', '#FF4444'] : ['#36D592', '#13BC71']}
-                      style={styles.recordButton}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                    >
-                      <View className="absolute inset-0 items-center justify-center">
-                        <View className="w-36 h-36 bg-white/10 rounded-full absolute" />
-                        <View className="w-28 h-28 bg-white/20 rounded-full absolute" />
-                      </View>
-                      <Svg width="72" height="72" viewBox="0 0 24 24">
-                        {isHolding ? (
-                          // Stop icon
-                          <Rect
-                            x="6"
-                            y="6"
-                            width="12"
-                            height="12"
-                            rx="3"
+                    <View style={styles.buttonInner}>
+                      <View style={styles.buttonRing1} />
+                      <View style={styles.buttonRing2} />
+                    </View>
+                    <Svg width="56" height="56" viewBox="0 0 24 24">
+                      {isHolding ? (
+                        <Rect
+                          x="7"
+                          y="7"
+                          width="10"
+                          height="10"
+                          rx="2"
+                          fill="white"
+                        />
+                      ) : (
+                        <>
+                          <Path
+                            d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"
                             fill="white"
                           />
-                        ) : (
-                          // Microphone icon
-                          <>
-                            <Path
-                              d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"
-                              fill="white"
-                            />
-                            <Path
-                              d="M19 10v1a7 7 0 0 1-14 0v-1"
-                              stroke="white"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              fill="none"
-                            />
-                            <Path
-                              d="M12 18v4m-4 0h8"
-                              stroke="white"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                            />
-                          </>
-                        )}
-                      </Svg>
-                    </LinearGradient>
-                  </Animated.View>
-                </Pressable>
-                
-                {/* Recording Duration Indicator */}
-                {isHolding && (
-                  <Animated.View
-                    style={[
-                      styles.recordingIndicator,
-                      {
-                        opacity: recordingIndicatorAnim,
-                      }
-                    ]}
-                  >
-                    <View className="flex-row items-center">
-                      <View className="w-2 h-2 bg-red-500 rounded-full mr-2">
-                        <Animated.View
-                          className="w-2 h-2 bg-red-500 rounded-full"
-                          style={{
-                            opacity: recordingIndicatorAnim,
-                          }}
-                        />
-                      </View>
-                      <Text 
-                        className="text-red-500 text-sm"
-                        style={{ fontFamily: 'Poppins-Medium' }}
-                      >
-                        {recordingDuration}s
-                      </Text>
-                    </View>
-                  </Animated.View>
-                )}
-              </View>
-              
-              {/* Waveform Visualization */}
-              {isHolding && (
-                <View className="absolute" style={{ bottom: -80 }}>
-                  <AudioWaveform
-                    isActive={isRecording}
-                    isSpeaking={isRecording}
-                    color="#FF6B6B"
-                    width={280}
-                    height={60}
-                  />
-                </View>
-              )}
-              
-              {/* Recording Status */}
-              <Text 
-                className="text-neutral-dark text-lg mt-4"
-                style={{ 
-                  fontFamily: 'Poppins-Medium'
-                }}
-              >
-                {isHolding ? 'Release to save' : 'Hold to record'}
-              </Text>
+                          <Path
+                            d="M19 10v1a7 7 0 0 1-14 0v-1"
+                            stroke="white"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            fill="none"
+                          />
+                          <Path
+                            d="M12 18v4m-4 0h8"
+                            stroke="white"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          />
+                        </>
+                      )}
+                    </Svg>
+                  </LinearGradient>
+                </Animated.View>
+              </Pressable>
             </View>
+
+            {/* Button Label */}
+            <Text 
+              style={[
+                styles.buttonLabel,
+                { color: isHolding ? theme.colors.error : theme.colors.text.secondary }
+              ]}
+            >
+              {isHolding ? 'Release to save' : isProcessing ? 'Processing...' : ''}
+            </Text>
             
             {/* Status Message */}
             {showStatusMessage && (
@@ -571,73 +461,160 @@ const HomeScreen = () => {
                   },
                 ]}
               >
-                <View className={`${statusMessage.includes('success') ? 'bg-green-500' : 'bg-neutral-800'} rounded-full px-5 py-2.5`}>
-                  <Text 
-                    className="text-white text-sm"
-                    style={{ fontFamily: 'Poppins-Medium' }}
-                  >
+                <AnimatedCard variant="elevated" style={styles.statusCard}>
+                  <Text style={styles.statusText}>
                     {statusMessage}
                   </Text>
-                </View>
+                </AnimatedCard>
               </Animated.View>
             )}
           </View>
-          
-          {/* Bottom Info */}
-          <Animated.View 
-            className="px-6 pb-8"
-            style={{ opacity: fadeAnim }}
-          >
-            <Text 
-              className="text-center text-neutral-dark/50 text-xs"
-              style={{ fontFamily: 'Poppins-Regular' }}
-            >
-              Your recordings are processed in the background
-            </Text>
-          </Animated.View>
         </Animated.View>
-      </SafeAreaView>
-    </LinearGradient>
+      </LinearGradient>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  recordButton: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 12,
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
   },
-  ripple: {
-    position: 'absolute',
-    width: 160,
-    height: 160,
-    borderRadius: 80,
-    backgroundColor: '#FF6B6B',
+  gradient: {
+    flex: 1,
+  },
+  content: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.lg,
+  },
+  welcomeContainer: {
+    marginBottom: theme.spacing.xl,
+  },
+  welcomeCard: {
+    backgroundColor: 'transparent',
+    padding: 0,
+  },
+  greeting: {
+    fontSize: theme.typography.fontSize.lg,
+    fontFamily: theme.typography.fontFamily.light,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing.xs,
+  },
+  userName: {
+    fontSize: theme.typography.fontSize.xxl,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+  },
+  mainSection: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
   },
   recordingIndicator: {
     position: 'absolute',
-    top: -45,
-    backgroundColor: 'white',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 3,
-    elevation: 2,
+    bottom: 100,
+    alignSelf: 'center',
+    zIndex: 10,
+  },
+  recordingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    backgroundColor: theme.colors.surface,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.error,
+    marginRight: theme.spacing.sm,
+  },
+  recordingText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.text.primary,
+  },
+  waveformContainer: {
+    position: 'absolute',
+    top: -80,
+    width: width - 48,
+    height: 40,
+    opacity: 0.5,
+  },
+  instructionContainer: {
+    marginBottom: theme.spacing.xxl,
+  },
+  instruction: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    textAlign: 'center',
+  },
+  buttonContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing.lg,
+  },
+  ripple: {
+    position: 'absolute',
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: theme.colors.primary,
+  },
+  recordButton: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...elevation(8),
+  },
+  buttonInner: {
+    position: 'absolute',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buttonRing1: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    position: 'absolute',
+  },
+  buttonRing2: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    position: 'absolute',
+  },
+  buttonLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    textAlign: 'center',
+    marginTop: theme.spacing.md,
+    height: 20,
   },
   statusMessage: {
     position: 'absolute',
-    bottom: 120,
+    bottom: 100,
     alignSelf: 'center',
+  },
+  statusCard: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    backgroundColor: theme.colors.surface,
+  },
+  statusText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.success,
   },
 });
 

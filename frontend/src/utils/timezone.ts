@@ -109,16 +109,36 @@ export const isYesterday = (utcTimestamp: string): boolean => {
 
 /**
  * Format a date for display with relative terms.
- * @param utcTimestamp - ISO string timestamp in UTC
+ * @param dateInput - ISO string timestamp in UTC or date string (YYYY-MM-DD)
  * @returns "Today", "Yesterday", or formatted date
  */
-export const formatRelativeDate = (utcTimestamp: string): string => {
-  if (isToday(utcTimestamp)) {
+export const formatRelativeDate = (dateInput: string): string => {
+  // If it's just a date string (YYYY-MM-DD), compare dates directly
+  if (dateInput && dateInput.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    const inputDate = new Date(dateInput + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    inputDate.setHours(0, 0, 0, 0);
+    
+    if (inputDate.getTime() === today.getTime()) {
+      return 'Today';
+    } else if (inputDate.getTime() === yesterday.getTime()) {
+      return 'Yesterday';
+    } else {
+      return inputDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+  }
+  
+  // Otherwise treat as UTC timestamp
+  if (isToday(dateInput)) {
     return 'Today';
-  } else if (isYesterday(utcTimestamp)) {
+  } else if (isYesterday(dateInput)) {
     return 'Yesterday';
   } else {
-    return formatUTCToLocalDate(utcTimestamp);
+    return formatUTCToLocalDate(dateInput);
   }
 };
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -7,14 +7,22 @@ import {
   ActivityIndicator,
   FlatList,
   RefreshControl,
-  Alert
+  Alert,
+  StyleSheet,
+  Animated,
+  Dimensions,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
-import Svg, { Path, Circle } from 'react-native-svg';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import Svg, { Path } from 'react-native-svg';
 import { notesAPI, reviewsAPI } from '../services/api';
 import { formatRelativeDate, formatUTCToLocalTime } from '../utils/timezone';
+import { theme, elevation } from '../theme';
+import { AnimatedCard } from '../components/ui';
+
+const { width } = Dimensions.get('window');
 
 type TabType = 'notes' | 'reviews';
 
@@ -26,6 +34,39 @@ const JournalScreen = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isGeneratingReview, setIsGeneratingReview] = useState(false);
+  
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const scaleAnim = useRef(new Animated.Value(0.95)).current;
+  const tabSlideAnim = useRef(new Animated.Value(0)).current;
+
+  // Entrance animations on focus
+  useFocusEffect(
+    useCallback(() => {
+      fadeAnim.setValue(0);
+      slideAnim.setValue(30);
+      scaleAnim.setValue(0.95);
+      
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: theme.animation.duration.normal,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: theme.animation.duration.normal,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          tension: 20,
+          friction: 7,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }, [])
+  );
 
   useEffect(() => {
     loadData();
@@ -48,7 +89,6 @@ const JournalScreen = () => {
 
   const loadNotes = async () => {
     try {
-      // Get notes for the last 30 days
       const endDate = new Date();
       const startDate = new Date();
       startDate.setDate(startDate.getDate() - 30);
@@ -67,7 +107,20 @@ const JournalScreen = () => {
   const loadReviews = async () => {
     try {
       const reviewsData = await reviewsAPI.getReviewHistory(0, 50);
-      setReviews(reviewsData || []);
+      // Filter out empty or invalid reviews
+      const validReviews = (reviewsData || []).filter(
+        (review: any) => {
+          if (!review) return false;
+          // Check for old format fields
+          if (review.summary || review.key_topics || review.achievements) return true;
+          // Check for new format with content field
+          if (review.content) {
+            return review.content.day_overview || review.content.week_summary || review.content.achievements;
+          }
+          return false;
+        }
+      );
+      setReviews(validReviews);
     } catch (error) {
       console.error('Error loading reviews:', error);
       setReviews([]);
@@ -99,415 +152,511 @@ const JournalScreen = () => {
           }
         ]
       );
-      
-      setTimeout(() => {
-        loadReviews();
-      }, 10000);
-      
     } catch (error: any) {
-      console.error('Error generating review:', error);
-      
-      if (error.message?.includes('409')) {
-        Alert.alert('Review Already Exists', 'A daily review already exists for today.');
-      } else if (error.message?.includes('400')) {
-        Alert.alert('No Notes Found', 'Please add some notes for today before generating a review.');
-      } else {
-        Alert.alert('Error', error.message || 'Failed to generate daily review. Please try again.');
-      }
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to generate review',
+        [{ text: 'OK' }]
+      );
     } finally {
       setIsGeneratingReview(false);
     }
   };
 
+  const switchTab = (tab: TabType) => {
+    if (tab === activeTab) return;
+    
+    // Animate tab switch
+    Animated.timing(tabSlideAnim, {
+      toValue: tab === 'notes' ? 0 : 1,
+      duration: theme.animation.duration.fast,
+      useNativeDriver: true,
+    }).start();
+    
+    setActiveTab(tab);
+  };
+
+  const getNotePreview = (content: any) => {
+    if (!content || typeof content !== 'string') {
+      return 'No content available';
+    }
+    const plainText = content.replace(/[#*_`]/g, '');
+    return plainText.length > 100 ? plainText.substring(0, 100) + '...' : plainText;
+  };
+
   const formatDate = (item: any) => {
-    // Use created_at timestamp for accurate date display
-    // Fall back to date field if created_at is not available
-    const timestamp = item.created_at || item.date + 'T00:00:00Z';
-    return formatRelativeDate(timestamp);
-  };
-
-  const formatTime = (dateString: string) => {
-    return formatUTCToLocalTime(dateString);
-  };
-
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return '#36D592';
-    if (score >= 60) return '#FFD700';
-    if (score >= 40) return '#FF7849';
-    return '#FF4444';
-  };
-
-  // Get preview text from note content
-  const getNotePreview = (content: any): string => {
-    if (!content) return 'No content';
-    
-    // Handle JSON structure with entries
-    if (content.entries && Array.isArray(content.entries)) {
-      // Combine all entry contents
-      const allText = content.entries
-        .map((entry: any) => entry.content)
-        .join(' ');
-      
-      // Return first 150 characters as preview
-      return allText.length > 150 ? allText.substring(0, 150) + '...' : allText;
+    if (item.type === 'weekly') {
+      return `Week of ${new Date(item.period_start).toLocaleDateString()}`;
     }
-    
-    // Handle old string format
-    if (typeof content === 'string') {
-      return content.length > 150 ? content.substring(0, 150) + '...' : content;
-    }
-    
-    return 'No content';
+    return formatRelativeDate(item.date || item.review_date);
   };
 
-  const renderNoteItem = ({ item }: { item: any }) => (
-    <TouchableOpacity
+  const formatTime = (timestamp: string) => {
+    return formatUTCToLocalTime(timestamp);
+  };
+
+  const renderNoteItem = ({ item, index }: { item: any; index: number }) => (
+    <Pressable
       onPress={() => navigation.navigate('NoteDetail', { noteData: item })}
-      activeOpacity={0.8}
-      className="mb-3"
+      style={{ marginBottom: theme.spacing.md }}
     >
-      <View className="bg-white/60 backdrop-blur rounded-2xl p-4 border border-neutral-light">
-        <View className="flex-row items-center justify-between mb-2">
-          <View className="flex-row items-center flex-1">
-            <View className="w-10 h-10 bg-green-100 rounded-xl items-center justify-center mr-3">
-              <Svg width="20" height="20" viewBox="0 0 24 24">
-                <Path
-                  d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"
-                  stroke="#36D592"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                />
-                <Path
-                  d="M14 2v6h6"
-                  stroke="#36D592"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-            </View>
-            <View className="flex-1">
-              <Text 
-                className="text-base text-neutral-dark"
-                style={{ fontFamily: 'Poppins-SemiBold' }}
-              >
-                {formatDate(item)}
-              </Text>
-              <Text 
-                className="text-sm text-neutral-mid"
-                style={{ fontFamily: 'Poppins-Regular' }}
-              >
-                {formatTime(item.created_at)}
-              </Text>
-            </View>
-          </View>
-          <Svg width="20" height="20" viewBox="0 0 24 24">
-            <Path
-              d="M9 18l6-6-6-6"
-              stroke="#C5BFD3"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </Svg>
-        </View>
-        <Text 
-          className="text-sm text-neutral-deep"
-          numberOfLines={2}
-          style={{ fontFamily: 'Poppins-Regular' }}
-        >
-          {getNotePreview(item.content)}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  );
-
-  const renderReviewItem = ({ item }: { item: any }) => {
-    const isWeekly = item.type === 'weekly';
-    const score = isWeekly ? item.content.average_score : item.score;
-    const color = getScoreColor(score);
-
-    return (
-      <TouchableOpacity
-        onPress={() => navigation.navigate('ReviewDetail', { reviewData: item })}
-        activeOpacity={0.8}
-        className="mb-3"
+      <AnimatedCard
+        variant="elevated"
+        animationType="slide"
+        delay={index * 50}
+        style={styles.noteCard}
       >
-        <View 
-          className="bg-white/60 backdrop-blur rounded-2xl p-4 border"
-          style={{ borderColor: isWeekly ? '#B483F0' : '#36D592' }}
-        >
-          <View className="flex-row items-center justify-between mb-2">
-            <View className="flex-row items-center flex-1">
-              <View 
-                className="w-10 h-10 rounded-xl items-center justify-center mr-3"
-                style={{ backgroundColor: isWeekly ? '#B483F020' : '#36D59220' }}
-              >
-                <Svg width="20" height="20" viewBox="0 0 24 24">
-                  {isWeekly ? (
-                    <Path
-                      d="M8 7V3M16 7V3M3 11h18M5 7h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V9a2 2 0 012-2z"
-                      stroke="#B483F0"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      fill="none"
-                    />
-                  ) : (
-                    <Path
-                      d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-                      fill="#36D592"
-                    />
-                  )}
-                </Svg>
-              </View>
-              <View className="flex-1">
-                <View className="flex-row items-center">
-                  <Text 
-                    className="text-base text-neutral-dark mr-2"
-                    style={{ fontFamily: 'Poppins-SemiBold' }}
-                  >
-                    {isWeekly ? 'Weekly' : 'Daily'} Review
-                  </Text>
-                  <View 
-                    className="px-2 py-0.5 rounded-full"
-                    style={{ backgroundColor: color + '20' }}
-                  >
-                    <Text 
-                      className="text-xs"
-                      style={{ fontFamily: 'Poppins-SemiBold', color }}
-                    >
-                      {Math.round(score)}
-                    </Text>
-                  </View>
-                </View>
-                <Text 
-                  className="text-sm text-neutral-mid"
-                  style={{ fontFamily: 'Poppins-Regular' }}
-                >
-                  {formatDate(item)}
-                </Text>
-              </View>
-            </View>
-            <Svg width="20" height="20" viewBox="0 0 24 24">
+        <View style={styles.noteHeader}>
+          <View style={styles.noteInfo}>
+            <Text style={styles.noteTitle} numberOfLines={1}>
+              {formatRelativeDate(item.date || item.created_at)}
+            </Text>
+            <Text style={styles.noteTime}>
+              {formatTime(item.created_at)}
+            </Text>
+            {item.content && item.content !== '' && (
+              <Text style={styles.notePreview} numberOfLines={2}>
+                {getNotePreview(item.content)}
+              </Text>
+            )}
+          </View>
+          <View style={styles.noteChevron}>
+            <Svg width="16" height="16" viewBox="0 0 24 24">
               <Path
                 d="M9 18l6-6-6-6"
-                stroke="#C5BFD3"
+                stroke={theme.colors.text.light}
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
+                fill="none"
               />
             </Svg>
           </View>
-          <Text 
-            className="text-sm text-neutral-deep"
-            numberOfLines={2}
-            style={{ fontFamily: 'Poppins-Regular' }}
-          >
-            {item.content.day_overview || item.content.summary || item.content.week_summary}
-          </Text>
         </View>
-      </TouchableOpacity>
+        {item.tags && item.tags.length > 0 && (
+          <View style={styles.tagContainer}>
+            {item.tags.slice(0, 3).map((tag: string, idx: number) => (
+              <View key={idx} style={styles.tag}>
+                <Text style={styles.tagText}>{tag}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </AnimatedCard>
+    </Pressable>
+  );
+
+  const renderReviewItem = ({ item, index }: { item: any; index: number }) => {
+    const sentimentColors: Record<string, string> = {
+      // Old format
+      positive: theme.colors.success,
+      negative: theme.colors.error,
+      neutral: theme.colors.secondary,
+      mixed: theme.colors.warning,
+      // New emotional colors
+      energized: '#FFB84D',
+      happy: theme.colors.success,
+      content: '#7DC383',
+      calm: '#98A1BC',
+      focused: '#6B8EE5',
+      anxious: theme.colors.warning,
+      stressed: '#FF8A80',
+      sad: '#9E9E9E',
+      frustrated: theme.colors.error,
+      tired: '#B8BFD0'
+    };
+    
+    // Get sentiment from content.emotional_color or fallback to old format
+    const sentiment = item.content?.emotional_color || item.sentiment || 'neutral';
+    const color = sentimentColors[sentiment.toLowerCase()] || theme.colors.secondary;
+    
+    // Get summary text from new or old format
+    const summaryText = item.content?.day_overview || item.content?.week_summary || item.summary;
+
+    return (
+      <Pressable
+        onPress={() => navigation.navigate('ReviewDetail', { reviewData: item })}
+        style={{ marginBottom: theme.spacing.md }}
+      >
+        <AnimatedCard
+          variant="elevated"
+          animationType="slide"
+          delay={index * 50}
+          style={[styles.reviewCard, { borderWidth: 2, borderColor: color }]}
+        >
+          <View style={[styles.reviewAccent, { backgroundColor: color }]} />
+          <View style={styles.reviewContent}>
+            <View style={styles.reviewHeader}>
+              <View>
+                <Text style={styles.reviewTitle}>
+                  {item.type === 'weekly' ? 'Weekly Review' : 'Daily Review'}
+                </Text>
+                <Text style={styles.reviewDate}>{formatDate(item)}</Text>
+              </View>
+              <View style={[styles.sentimentBadge, { backgroundColor: `${color}15` }]}>
+                <Text style={[styles.sentimentText, { color }]}>
+                  {sentiment.charAt(0).toUpperCase() + sentiment.slice(1)}
+                </Text>
+              </View>
+            </View>
+            {summaryText && (
+              <Text style={styles.reviewSummary} numberOfLines={2}>
+                {summaryText}
+              </Text>
+            )}
+          </View>
+        </AnimatedCard>
+      </Pressable>
     );
   };
 
   const EmptyState = ({ type }: { type: TabType }) => (
-    <View className="flex-1 justify-center items-center px-8 py-20">
-      <View className="w-24 h-24 bg-neutral-light/30 rounded-full items-center justify-center mb-4">
-        <Svg width="48" height="48" viewBox="0 0 24 24">
-          {type === 'notes' ? (
-            <Path
-              d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6z"
-              stroke="#C5BFD3"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              fill="none"
-            />
-          ) : (
-            <Path
-              d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-              stroke="#C5BFD3"
-              strokeWidth="1.5"
-              fill="none"
-            />
-          )}
-        </Svg>
-      </View>
-      <Text 
-        className="text-lg text-neutral-deep text-center mb-2"
-        style={{ fontFamily: 'Poppins-Medium' }}
-      >
-        No {type === 'notes' ? 'Notes' : 'Reviews'} Yet
-      </Text>
-      <Text 
-        className="text-sm text-neutral-mid text-center"
-        style={{ fontFamily: 'Poppins-Regular' }}
-      >
-        {type === 'notes' 
-          ? 'Start recording to create your first note'
-          : 'Your reviews will appear here after recording notes'}
-      </Text>
+    <View style={styles.emptyContainer}>
+      <AnimatedCard variant="flat" style={styles.emptyCard}>
+        {type === 'notes' && (
+          <Text style={styles.emptyIcon}>📝</Text>
+        )}
+        <Text style={styles.emptyTitle}>
+          No {type === 'notes' ? 'Notes' : 'Reviews'} Yet
+        </Text>
+        <Text style={styles.emptyText}>
+          {type === 'notes' 
+            ? 'Start recording to create your first note'
+            : 'Your daily reviews will appear here'}
+        </Text>
+      </AnimatedCard>
     </View>
   );
 
   return (
-    <LinearGradient
-      colors={['#F0FDF9', '#FAF8FE', '#FFE8DB']}
-      style={{ flex: 1 }}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-    >
-      <SafeAreaView className="flex-1">
-        <View className="flex-1">
-          {/* Header */}
-          <View className="px-6 pt-6 pb-4">
-            <Text 
-              className="text-3xl text-neutral-dark mb-4"
-              style={{ fontFamily: 'Poppins-Bold' }}
+    <SafeAreaView style={styles.container}>
+      <LinearGradient
+        colors={theme.colors.gradients.soft}
+        style={styles.gradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+      >
+        {/* Header */}
+        <Animated.View 
+          style={[
+            styles.header,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }]
+            }
+          ]}
+        >
+          <Text style={styles.title}>Journal</Text>
+          
+          {/* Tab Switcher */}
+          <View style={styles.tabContainer}>
+            <Animated.View 
+              style={[
+                styles.tabIndicator,
+                {
+                  transform: [{
+                    translateX: tabSlideAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0, width / 2 - theme.spacing.lg]
+                    })
+                  }]
+                }
+              ]}
+            />
+            <Pressable 
+              style={styles.tab}
+              onPress={() => switchTab('notes')}
             >
-              Journal
-            </Text>
-            
-            {/* Tabs */}
-            <View className="flex-row bg-white/40 backdrop-blur rounded-2xl p-1.5">
-              <TouchableOpacity
-                onPress={() => setActiveTab('notes')}
-                activeOpacity={0.8}
-                className="flex-1"
-              >
-                <View 
-                  className={`py-3 px-4 rounded-xl ${activeTab === 'notes' ? 'bg-white' : ''}`}
-                >
-                  <Text 
-                    className={`text-center ${activeTab === 'notes' ? 'text-neutral-dark' : 'text-neutral-mid'}`}
-                    style={{ fontFamily: activeTab === 'notes' ? 'Poppins-SemiBold' : 'Poppins-Medium' }}
-                  >
-                    Notes
-                  </Text>
-                </View>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => setActiveTab('reviews')}
-                activeOpacity={0.8}
-                className="flex-1"
-              >
-                <View 
-                  className={`py-3 px-4 rounded-xl ${activeTab === 'reviews' ? 'bg-white' : ''}`}
-                >
-                  <Text 
-                    className={`text-center ${activeTab === 'reviews' ? 'text-neutral-dark' : 'text-neutral-mid'}`}
-                    style={{ fontFamily: activeTab === 'reviews' ? 'Poppins-SemiBold' : 'Poppins-Medium' }}
-                  >
-                    Reviews
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </View>
+              <Text style={[
+                styles.tabText,
+                activeTab === 'notes' && styles.tabTextActive
+              ]}>
+                Notes
+              </Text>
+            </Pressable>
+            <Pressable 
+              style={styles.tab}
+              onPress={() => switchTab('reviews')}
+            >
+              <Text style={[
+                styles.tabText,
+                activeTab === 'reviews' && styles.tabTextActive
+              ]}>
+                Reviews
+              </Text>
+            </Pressable>
           </View>
+        </Animated.View>
 
-          {/* Content */}
-          <View className="flex-1 px-6">
-            {loading ? (
-              <View className="flex-1 justify-center items-center">
-                <ActivityIndicator size="large" color="#36D592" />
-              </View>
-            ) : activeTab === 'notes' ? (
-              notes.length > 0 ? (
-                <FlatList
-                  data={notes}
-                  renderItem={renderNoteItem}
-                  keyExtractor={(item) => item.id}
-                  showsVerticalScrollIndicator={false}
-                  refreshControl={
-                    <RefreshControl
-                      refreshing={refreshing}
-                      onRefresh={onRefresh}
-                      colors={['#36D592']}
-                      tintColor="#36D592"
-                    />
-                  }
-                  contentContainerStyle={{ paddingBottom: 100 }}
+        {/* Content */}
+        <Animated.View 
+          style={[
+            styles.content,
+            {
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }]
+            }
+          ]}
+        >
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={theme.colors.primary} />
+            </View>
+          ) : (
+            <FlatList
+              data={activeTab === 'notes' ? notes : reviews}
+              renderItem={activeTab === 'notes' ? renderNoteItem : renderReviewItem}
+              keyExtractor={(item) => item.id?.toString() || item.created_at}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  tintColor={theme.colors.primary}
                 />
-              ) : (
-                <EmptyState type="notes" />
-              )
-            ) : (
-              <View className="flex-1">
-                {/* Create Daily Review Button */}
-                <TouchableOpacity
-                  onPress={handleGenerateReview}
-                  disabled={isGeneratingReview}
-                  activeOpacity={0.8}
-                  className="mb-4"
-                >
-                  <LinearGradient
-                    colors={isGeneratingReview ? ['#E5E5E5', '#D0D0D0'] : ['#36D592', '#2BC482']}
-                    style={{ borderRadius: 16, padding: 16 }}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  >
-                    <View className="flex-row items-center justify-center">
-                      {isGeneratingReview ? (
-                        <>
-                          <ActivityIndicator size="small" color="white" />
-                          <Text 
-                            className="text-white ml-2"
-                            style={{ fontFamily: 'Poppins-SemiBold' }}
-                          >
-                            Generating Review...
-                          </Text>
-                        </>
-                      ) : (
-                        <>
-                          <Svg width="20" height="20" viewBox="0 0 24 24" style={{ marginRight: 8 }}>
-                            <Path
-                              d="M12 5v14M5 12h14"
-                              stroke="white"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            />
-                          </Svg>
-                          <Text 
-                            className="text-white"
-                            style={{ fontFamily: 'Poppins-SemiBold' }}
-                          >
-                            Create Daily Review
-                          </Text>
-                        </>
-                      )}
-                    </View>
-                  </LinearGradient>
-                </TouchableOpacity>
-                
-                {reviews.length > 0 ? (
-                  <FlatList
-                    data={reviews}
-                    renderItem={renderReviewItem}
-                    keyExtractor={(item) => item.id}
-                    showsVerticalScrollIndicator={false}
-                    refreshControl={
-                      <RefreshControl
-                        refreshing={refreshing}
-                        onRefresh={onRefresh}
-                        colors={['#36D592']}
-                        tintColor="#36D592"
-                      />
-                    }
-                    contentContainerStyle={{ paddingBottom: 100 }}
-                  />
+              }
+              ListEmptyComponent={<EmptyState type={activeTab} />}
+            />
+          )}
+        </Animated.View>
+
+        {/* Generate Review Button */}
+        {activeTab === 'reviews' && !loading && (
+          <Animated.View 
+            style={[
+              styles.generateButton,
+              { opacity: fadeAnim }
+            ]}
+          >
+            <TouchableOpacity
+              onPress={handleGenerateReview}
+              disabled={isGeneratingReview}
+              style={styles.generateButtonInner}
+            >
+              <LinearGradient
+                colors={theme.colors.gradients.primary}
+                style={styles.generateGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                {isGeneratingReview ? (
+                  <ActivityIndicator size="small" color="white" />
                 ) : (
-                  <EmptyState type="reviews" />
+                  <Text style={styles.generateText}>Generate Daily Review</Text>
                 )}
-              </View>
-            )}
-          </View>
-        </View>
-      </SafeAreaView>
-    </LinearGradient>
+              </LinearGradient>
+            </TouchableOpacity>
+          </Animated.View>
+        )}
+      </LinearGradient>
+    </SafeAreaView>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  gradient: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+  },
+  title: {
+    fontSize: theme.typography.fontSize.xxxl,
+    fontFamily: theme.typography.fontFamily.bold,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.lg,
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    padding: 4,
+    ...elevation(2),
+    position: 'relative',
+  },
+  tabIndicator: {
+    position: 'absolute',
+    top: 4,
+    left: 4,
+    width: (width - theme.spacing.lg * 2 - 8) / 2,
+    height: 40,
+    backgroundColor: theme.colors.primary,
+    borderRadius: theme.borderRadius.md,
+  },
+  tab: {
+    flex: 1,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  tabText: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.text.secondary,
+  },
+  tabTextActive: {
+    color: theme.colors.text.inverse,
+  },
+  content: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  listContent: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.xxl,
+  },
+  noteCard: {
+    padding: theme.spacing.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.text.primary,
+  },
+  noteHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  noteInfo: {
+    flex: 1,
+  },
+  noteTitle: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.xs,
+  },
+  noteTime: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+  },
+  noteChevron: {
+    marginLeft: theme.spacing.md,
+  },
+  notePreview: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing.xs,
+    lineHeight: 20,
+  },
+  tagContainer: {
+    flexDirection: 'row',
+    marginTop: theme.spacing.sm,
+    gap: theme.spacing.xs,
+  },
+  tag: {
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 2,
+    borderRadius: theme.borderRadius.sm,
+  },
+  tagText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+  },
+  reviewCard: {
+    flexDirection: 'row',
+    overflow: 'hidden',
+    padding: 0,
+  },
+  reviewAccent: {
+    width: 4,
+  },
+  reviewContent: {
+    flex: 1,
+    padding: theme.spacing.lg,
+  },
+  reviewHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: theme.spacing.sm,
+  },
+  reviewTitle: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+  },
+  reviewDate: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    marginTop: 2,
+  },
+  sentimentBadge: {
+    paddingHorizontal: theme.spacing.sm,
+    paddingVertical: 4,
+    borderRadius: theme.borderRadius.sm,
+  },
+  sentimentText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontFamily: theme.typography.fontFamily.medium,
+  },
+  reviewSummary: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    lineHeight: 20,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.xxl * 2,
+  },
+  emptyCard: {
+    alignItems: 'center',
+    padding: theme.spacing.xxl,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: theme.spacing.md,
+  },
+  emptyTitle: {
+    fontSize: theme.typography.fontSize.lg,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.xs,
+  },
+  emptyText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    textAlign: 'center',
+  },
+  generateButton: {
+    position: 'absolute',
+    bottom: theme.spacing.xxl + 80,
+    left: theme.spacing.lg,
+    right: theme.spacing.lg,
+  },
+  generateButtonInner: {
+    borderRadius: theme.borderRadius.lg,
+    overflow: 'hidden',
+    ...elevation(4),
+  },
+  generateGradient: {
+    paddingVertical: theme.spacing.md,
+    alignItems: 'center',
+  },
+  generateText: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.inverse,
+  },
+});
 
 export default JournalScreen;

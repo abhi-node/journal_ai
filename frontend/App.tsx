@@ -65,10 +65,21 @@ function AppContent() {
     async function loadFonts() {
       try {
         await Font.loadAsync({
+          // Legacy fonts (for fallback)
           'Poppins-Regular': require('./assets/fonts/Poppins-Regular.ttf'),
           'Poppins-Medium': require('./assets/fonts/Poppins-Medium.ttf'),
           'Poppins-SemiBold': require('./assets/fonts/Poppins-SemiBold.ttf'),
           'Poppins-Bold': require('./assets/fonts/Poppins-Bold.ttf'),
+          // Outfit fonts
+          'Outfit-Thin': require('./assets/fonts/Outfit-Thin.ttf'),
+          'Outfit-ExtraLight': require('./assets/fonts/Outfit-ExtraLight.ttf'),
+          'Outfit-Light': require('./assets/fonts/Outfit-Light.ttf'),
+          'Outfit-Regular': require('./assets/fonts/Outfit-Regular.ttf'),
+          'Outfit-Medium': require('./assets/fonts/Outfit-Medium.ttf'),
+          'Outfit-SemiBold': require('./assets/fonts/Outfit-SemiBold.ttf'),
+          'Outfit-Bold': require('./assets/fonts/Outfit-Bold.ttf'),
+          'Outfit-ExtraBold': require('./assets/fonts/Outfit-ExtraBold.ttf'),
+          'Outfit-Black': require('./assets/fonts/Outfit-Black.ttf'),
         });
         setFontsLoaded(true);
       } catch (error) {

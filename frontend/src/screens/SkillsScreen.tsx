@@ -1,29 +1,43 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, ScrollView, StyleSheet, Dimensions, RefreshControl, ActivityIndicator } from 'react-native';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { 
+  View, 
+  Text, 
+  ScrollView, 
+  StyleSheet, 
+  Dimensions, 
+  RefreshControl, 
+  ActivityIndicator,
+  Animated,
+  Pressable,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSelector, useDispatch } from 'react-redux';
 import { RootState, AppDispatch } from '../store';
 import { updateUser } from '../store/slices/authSlice';
-import Svg, { Path } from 'react-native-svg';
-import { BlurView } from 'expo-blur';
+import Svg, { Path, Circle } from 'react-native-svg';
 import { useFocusEffect } from '@react-navigation/native';
 import { API_CONFIG } from '../config/api';
+import { theme, elevation } from '../theme';
+import { AnimatedCard } from '../components/ui';
 
 const { width } = Dimensions.get('window');
-const CARD_WIDTH = (width - 48 - 16) / 2; // 2 columns with padding
+const CARD_WIDTH = width - theme.spacing.lg * 2;
 
 const SkillsScreen = () => {
   const dispatch = useDispatch<AppDispatch>();
   const { user, token } = useSelector((state: RootState) => state.auth);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
+  
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
   
   const skills = user?.stats?.skill_categories || {};
   const userLevel = user?.stats?.level || 1;
   const totalXP = user?.stats?.total_xp || 0;
 
-  // Calculate XP needed for next level (simple formula: level * 100)
   const xpForNextLevel = userLevel * 100;
   const xpProgress = totalXP % xpForNextLevel;
   const xpProgressPercentage = (xpProgress / xpForNextLevel) * 100;
@@ -55,9 +69,28 @@ const SkillsScreen = () => {
     }
   }, [token, dispatch]);
 
-  // Fetch fresh data when screen is focused
+  // Entrance animations and data fetch on tab focus
   useFocusEffect(
     useCallback(() => {
+      // Reset and start animations
+      fadeAnim.setValue(0);
+      scaleAnim.setValue(0.95);
+      
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: theme.animation.duration.normal,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          tension: 20,
+          friction: 7,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      
+      // Fetch fresh data
       fetchUserData(false);
     }, [fetchUserData])
   );
@@ -67,354 +100,384 @@ const SkillsScreen = () => {
     fetchUserData(false);
   }, [fetchUserData]);
 
-  const renderSkillCard = (skillName: string, skillData: any) => {
-    const { xp = 0, level = 1, color = '#36D592', icon = '🎯' } = skillData;
-    const skillXpForNext = level * 50; // XP needed for next skill level
+  const getSkillColor = (skillData: any) => {
+    // Use color from backend if available, otherwise use a default based on skill name
+    if (skillData.color) {
+      return skillData.color;
+    }
+    
+    // Fallback colors for skills without backend colors
+    const colors = ['#7DC383', '#F5C99B', '#98A1BC', '#E8A0A0', '#B8BFD0'];
+    const index = Math.abs(skillData.name?.charCodeAt(0) || 0) % colors.length;
+    return colors[index];
+  };
+
+  const getSkillIcon = (skillData: any) => {
+    // Use icon from backend if available
+    if (skillData.icon) {
+      return skillData.icon;
+    }
+    
+    // Fallback to default icon
+    return '⭐';
+  };
+
+  const renderSkillCard = (skillName: string, skillData: any, index: number) => {
+    const { xp = 0, level = 1 } = skillData;
+    const skillXpForNext = level * 50;
     const skillProgress = (xp % skillXpForNext) / skillXpForNext;
+    const color = getSkillColor(skillData);
+    const icon = getSkillIcon(skillData);
+    const isSelected = selectedSkill === skillName;
 
     return (
-      <View key={skillName} style={[styles.skillCard, { width: CARD_WIDTH }]}>
-        <LinearGradient
-          colors={[color + '20', color + '10']}
-          style={styles.skillGradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        >
-          {/* Skill Icon and Name */}
-          <View style={styles.skillHeader}>
-            <View style={[styles.iconContainer, { backgroundColor: color + '30' }]}>
-              <Text style={styles.skillIcon}>{icon}</Text>
-            </View>
-            <View style={styles.skillInfo}>
-              <Text 
-                style={styles.skillName}
-                numberOfLines={1}
-                adjustsFontSizeToFit
-              >
+      <AnimatedCard
+        key={skillName}
+        variant="elevated"
+        animationType="scale"
+        delay={index * 100}
+        style={[
+          styles.skillCard,
+          { 
+            width: CARD_WIDTH,
+            borderColor: color, 
+            borderWidth: 2,
+            marginBottom: theme.spacing.md,
+            backgroundColor: theme.colors.surface,
+            padding: 0,
+            overflow: 'hidden',
+            borderLeftWidth: 4,
+            borderLeftColor: color,
+          },
+          isSelected && styles.selectedCard,
+        ]}
+        onPress={() => setSelectedSkill(isSelected ? null : skillName)}
+      >
+        <View style={styles.cardContentRow}>
+          {/* Icon */}
+          <View style={[styles.iconContainer, { backgroundColor: `${color}15` }]}>
+            <Text style={styles.icon}>{icon}</Text>
+          </View>
+          
+          {/* Skill Info */}
+          <View style={styles.skillInfo}>
+            <View style={styles.skillHeader}>
+              <Text style={styles.skillName} numberOfLines={2}>
                 {skillName}
               </Text>
-              <View style={styles.levelBadge}>
-                <Text style={[styles.levelText, { color }]}>Lvl {level}</Text>
+              <View style={[styles.levelBadge, { backgroundColor: `${color}20`, borderColor: color }]}>
+                <Text style={[styles.levelText, { color }]}>Lv {level}</Text>
               </View>
             </View>
-          </View>
-
-          {/* XP Progress */}
-          <View style={styles.xpSection}>
-            <Text style={styles.xpText}>{xp} XP</Text>
-            <View style={styles.progressBarContainer}>
-              <View 
-                style={[
-                  styles.progressBar,
-                  { 
-                    width: `${skillProgress * 100}%`,
-                    backgroundColor: color 
-                  }
-                ]}
-              />
+            
+            {/* XP Progress Bar */}
+            <View style={styles.progressContainer}>
+              <View style={styles.progressBackground}>
+                <Animated.View 
+                  style={[
+                    styles.progressFill,
+                    { 
+                      width: `${skillProgress * 100}%`,
+                      backgroundColor: color,
+                    }
+                  ]}
+                />
+              </View>
+              <Text style={[styles.xpText, { color: theme.colors.text.secondary }]}>+{xp} XP</Text>
             </View>
           </View>
-        </LinearGradient>
-      </View>
+        </View>
+      </AnimatedCard>
     );
   };
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <LinearGradient
-      colors={['#F0FDF9', '#FAF8FE', '#FFE8DB']}
-      style={{ flex: 1 }}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-    >
-      <SafeAreaView className="flex-1">
-        {loading && !user ? (
-          <View className="flex-1 justify-center items-center">
-            <ActivityIndicator size="large" color="#36D592" />
-            <Text className="text-neutral-mid text-sm mt-2" style={{ fontFamily: 'Poppins-Regular' }}>
-              Loading skills...
-            </Text>
-          </View>
-        ) : (
-        <ScrollView 
-          className="flex-1"
+    <SafeAreaView style={styles.container}>
+      <LinearGradient
+        colors={theme.colors.gradients.soft}
+        style={styles.gradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+      >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 120 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={['#36D592']}
-              tintColor="#36D592"
+              tintColor={theme.colors.primary}
             />
           }
         >
-          <View className="px-6">
-            {/* Header */}
-            <View className="pt-4 pb-2">
-              <Text 
-                className="text-3xl text-neutral-dark"
-                style={{ fontFamily: 'Poppins-Bold' }}
-              >
-                Skills & Progress
-              </Text>
-              <Text 
-                className="text-sm text-neutral-mid mt-1"
-                style={{ fontFamily: 'Poppins-Regular' }}
-              >
-                Track your growth across different areas
-              </Text>
-            </View>
-
+          {/* Header */}
+          <Animated.View 
+            style={[
+              styles.header,
+              {
+                opacity: fadeAnim,
+                transform: [{ scale: scaleAnim }]
+              }
+            ]}
+          >
+            <Text style={styles.title}>Skills</Text>
+            
             {/* Overall Level Card */}
-            <LinearGradient
-              colors={['#36D592', '#13BC71']}
-              style={styles.levelCard}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <View className="flex-row justify-between items-center">
-                <View>
-                  <Text 
-                    className="text-white/80 text-sm mb-1"
-                    style={{ fontFamily: 'Poppins-Medium' }}
-                  >
-                    Overall Level
-                  </Text>
-                  <Text 
-                    className="text-5xl text-white"
-                    style={{ fontFamily: 'Poppins-Bold' }}
-                  >
-                    {userLevel}
-                  </Text>
-                  <View className="mt-2">
-                    <View className="flex-row justify-between mb-1">
-                      <Text 
-                        className="text-white/70 text-xs"
-                        style={{ fontFamily: 'Poppins-Regular' }}
-                      >
-                        {totalXP} / {xpForNextLevel} XP
-                      </Text>
-                      <Text 
-                        className="text-white/70 text-xs"
-                        style={{ fontFamily: 'Poppins-Regular' }}
-                      >
-                        {Math.round(xpProgressPercentage)}%
-                      </Text>
-                    </View>
-                    <View style={styles.levelProgressContainer}>
-                      <View 
-                        style={[
-                          styles.levelProgressBar,
-                          { width: `${xpProgressPercentage}%` }
-                        ]}
-                      />
-                    </View>
-                  </View>
-                </View>
-                <View className="items-center justify-center">
-                  <View className="w-20 h-20 rounded-full bg-white/20 items-center justify-center">
-                    <Svg width="40" height="40" viewBox="0 0 24 24">
-                      <Path
-                        d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
-                        fill="white"
-                        opacity="0.9"
-                      />
-                    </Svg>
-                  </View>
-                </View>
-              </View>
-
-              {/* Stats Summary */}
-              <View className="flex-row justify-around mt-6 pt-4 border-t border-white/20">
-                <View className="items-center">
-                  <Text 
-                    className="text-white text-2xl"
-                    style={{ fontFamily: 'Poppins-Bold' }}
-                  >
-                    {Object.keys(skills).length}
-                  </Text>
-                  <Text 
-                    className="text-white/70 text-xs"
-                    style={{ fontFamily: 'Poppins-Regular' }}
-                  >
-                    Skills
-                  </Text>
-                </View>
-                <View className="items-center">
-                  <Text 
-                    className="text-white text-2xl"
-                    style={{ fontFamily: 'Poppins-Bold' }}
-                  >
-                    {user?.stats?.streak_days || 0}
-                  </Text>
-                  <Text 
-                    className="text-white/70 text-xs"
-                    style={{ fontFamily: 'Poppins-Regular' }}
-                  >
-                    Day Streak
-                  </Text>
-                </View>
-                <View className="items-center">
-                  <Text 
-                    className="text-white text-2xl"
-                    style={{ fontFamily: 'Poppins-Bold' }}
-                  >
-                    {user?.stats?.total_entries || 0}
-                  </Text>
-                  <Text 
-                    className="text-white/70 text-xs"
-                    style={{ fontFamily: 'Poppins-Regular' }}
-                  >
-                    Entries
-                  </Text>
-                </View>
-              </View>
-            </LinearGradient>
-
-            {/* Skills Grid */}
-            <View className="mt-6">
-              <Text 
-                className="text-neutral-dark text-lg mb-4"
-                style={{ fontFamily: 'Poppins-SemiBold' }}
+            <AnimatedCard variant="elevated" style={styles.levelCard}>
+              <LinearGradient
+                colors={theme.colors.gradients.primary}
+                style={styles.levelGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
               >
-                Your Skills
-              </Text>
-              
-              {Object.keys(skills).length > 0 ? (
-                <View style={styles.skillsGrid}>
-                  {Object.entries(skills).map(([skillName, skillData]) => 
-                    renderSkillCard(skillName, skillData)
-                  )}
-                </View>
-              ) : (
-                <BlurView intensity={30} tint="light" style={styles.emptyCard}>
-                  <View className="p-8 items-center">
-                    <View className="w-16 h-16 rounded-full bg-pastel-lavender-100 items-center justify-center mb-4">
-                      <Svg width="32" height="32" viewBox="0 0 24 24">
-                        <Path
-                          d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2Z"
-                          fill="#B483F0"
-                        />
-                      </Svg>
-                    </View>
-                    <Text 
-                      className="text-neutral-dark text-base text-center mb-2"
-                      style={{ fontFamily: 'Poppins-SemiBold' }}
-                    >
-                      No Skills Yet
-                    </Text>
-                    <Text 
-                      className="text-neutral-mid text-sm text-center"
-                      style={{ fontFamily: 'Poppins-Regular' }}
-                    >
-                      Complete your goal setup to see your personalized skills
-                    </Text>
+                <View style={styles.levelContent}>
+                  <View style={styles.levelInfo}>
+                    <Text style={styles.levelTitle}>Level</Text>
+                    <Text style={styles.levelNumber}>{userLevel}</Text>
                   </View>
-                </BlurView>
-              )}
-            </View>
+                  <View style={styles.xpInfo}>
+                    <Text style={styles.xpLabel}>Total XP</Text>
+                    <Text style={styles.xpValue}>{totalXP}</Text>
+                  </View>
+                </View>
+                
+                {/* XP Progress */}
+                <View style={styles.mainProgressContainer}>
+                  <View style={styles.mainProgressBackground}>
+                    <Animated.View 
+                      style={[
+                        styles.mainProgressFill,
+                        { width: `${xpProgressPercentage}%` }
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.progressLabel}>
+                    {xpProgress}/{xpForNextLevel} to next level
+                  </Text>
+                </View>
+              </LinearGradient>
+            </AnimatedCard>
+          </Animated.View>
+
+          {/* Skills List */}
+          <View style={styles.skillsList}>
+            {Object.entries(skills).map(([skillName, skillData], index) => 
+              renderSkillCard(skillName, skillData, index)
+            )}
           </View>
+
+          {/* Empty State */}
+          {Object.keys(skills).length === 0 && (
+            <AnimatedCard variant="flat" style={styles.emptyState}>
+              <Text style={styles.emptyIcon}>🎯</Text>
+              <Text style={styles.emptyText}>
+                Start journaling to build your skills
+              </Text>
+            </AnimatedCard>
+          )}
         </ScrollView>
-        )}
-      </SafeAreaView>
-    </LinearGradient>
+      </LinearGradient>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  levelCard: {
-    padding: 24,
-    borderRadius: 20,
-    marginTop: 16,
-    shadowColor: '#13BC71',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 15,
-    elevation: 10,
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
   },
-  levelProgressContainer: {
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 3,
+  gradient: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: theme.spacing.xxl,
+  },
+  header: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+  },
+  title: {
+    fontSize: theme.typography.fontSize.xxxl,
+    fontFamily: theme.typography.fontFamily.bold,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.lg,
+  },
+  levelCard: {
+    marginBottom: theme.spacing.lg,
+    padding: 0,
     overflow: 'hidden',
   },
-  levelProgressBar: {
+  levelGradient: {
+    padding: theme.spacing.lg,
+    borderRadius: theme.borderRadius.lg,
+  },
+  levelContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.md,
+  },
+  levelInfo: {
+    alignItems: 'center',
+  },
+  levelTitle: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.inverse,
+    opacity: 0.9,
+  },
+  levelNumber: {
+    fontSize: theme.typography.fontSize.xxxl,
+    fontFamily: theme.typography.fontFamily.bold,
+    color: theme.colors.text.inverse,
+  },
+  xpInfo: {
+    alignItems: 'center',
+  },
+  xpLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.inverse,
+    opacity: 0.9,
+  },
+  xpValue: {
+    fontSize: theme.typography.fontSize.xl,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.inverse,
+  },
+  mainProgressContainer: {
+    marginTop: theme.spacing.sm,
+  },
+  mainProgressBackground: {
+    height: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  mainProgressFill: {
     height: '100%',
     backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    borderRadius: 3,
+    borderRadius: 4,
   },
-  skillsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 16,
+  progressLabel: {
+    fontSize: theme.typography.fontSize.xs,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.inverse,
+    opacity: 0.8,
+    textAlign: 'center',
+    marginTop: theme.spacing.xs,
+  },
+  skillsList: {
+    paddingHorizontal: theme.spacing.lg,
   },
   skillCard: {
-    marginBottom: 8,
+    padding: 0,
+    overflow: 'hidden',
   },
-  skillGradient: {
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.5)',
+  selectedCard: {
+    transform: [{ scale: 0.98 }],
   },
-  skillHeader: {
+  cardContentRow: {
     flexDirection: 'row',
+    paddingVertical: theme.spacing.lg,
+    paddingLeft: theme.spacing.lg,
+    paddingRight: theme.spacing.xl,
     alignItems: 'center',
-    marginBottom: 12,
-  },
-  iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 10,
-  },
-  skillIcon: {
-    fontSize: 20,
   },
   skillInfo: {
     flex: 1,
+    marginLeft: theme.spacing.lg,
+  },
+  skillHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: theme.spacing.sm,
+  },
+  cardGradient: {
+    padding: theme.spacing.md,
+    borderRadius: theme.borderRadius.lg,
+    minHeight: 160,
+  },
+  iconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: theme.borderRadius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  icon: {
+    fontSize: 24,
   },
   skillName: {
-    fontSize: 14,
-    fontFamily: 'Poppins-SemiBold',
-    color: '#1F1B2E',
-    marginBottom: 2,
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    flex: 1,
+    marginRight: theme.spacing.sm,
   },
   levelBadge: {
-    alignSelf: 'flex-start',
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: 4,
+    borderRadius: theme.borderRadius.sm,
+    borderWidth: 1,
   },
   levelText: {
-    fontSize: 12,
-    fontFamily: 'Poppins-Medium',
+    fontSize: theme.typography.fontSize.xs,
+    fontFamily: theme.typography.fontFamily.medium,
   },
-  xpSection: {
-    marginTop: 4,
+  progressContainer: {
+    flex: 1,
   },
-  xpText: {
-    fontSize: 11,
-    fontFamily: 'Poppins-Regular',
-    color: '#7A7890',
-    marginBottom: 4,
-  },
-  progressBarContainer: {
-    height: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
-    borderRadius: 2,
+  progressBackground: {
+    height: 6,
+    backgroundColor: theme.colors.accent,
+    borderRadius: 3,
     overflow: 'hidden',
   },
-  progressBar: {
+  progressFill: {
     height: '100%',
     borderRadius: 2,
   },
-  emptyCard: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.5)',
-    borderWidth: 1,
-    borderColor: 'rgba(229,227,235,0.3)',
+  xpText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.medium,
+    marginTop: theme.spacing.xs,
+  },
+  emptyState: {
+    marginHorizontal: theme.spacing.lg,
+    marginTop: theme.spacing.xxl,
+    alignItems: 'center',
+    padding: theme.spacing.xxl,
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: theme.spacing.md,
+  },
+  emptyText: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    textAlign: 'center',
   },
 });
 

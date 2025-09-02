@@ -19,6 +19,7 @@ import { AppDispatch, RootState } from '../store';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Path, Circle } from 'react-native-svg';
+import { theme } from '../theme';
 
 const { width } = Dimensions.get('window');
 
@@ -103,10 +104,10 @@ const LoginScreen = () => {
 
   return (
     <LinearGradient
-      colors={['#F0FDF9', '#FAF8FE', '#FFE8DB']}
+      colors={theme.colors.gradients.soft}
       style={{ flex: 1 }}
       start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
+      end={{ x: 0, y: 1 }}
     >
       <SafeAreaView className="flex-1">
         {/* Background decorative elements */}
@@ -121,7 +122,7 @@ const LoginScreen = () => {
             }}
           >
             <Svg width="150" height="150" viewBox="0 0 150 150">
-              <Circle cx="75" cy="75" r="60" fill="#B483F0" opacity="0.3" />
+              <Circle cx="75" cy="75" r="60" fill={theme.colors.secondary} opacity="0.1" />
             </Svg>
           </Animated.View>
           
@@ -135,7 +136,7 @@ const LoginScreen = () => {
             }}
           >
             <Svg width="100" height="100" viewBox="0 0 100 100">
-              <Circle cx="50" cy="50" r="40" fill="#36D592" opacity="0.3" />
+              <Circle cx="50" cy="50" r="40" fill={theme.colors.primary} opacity="0.1" />
             </Svg>
           </Animated.View>
         </View>
@@ -164,7 +165,7 @@ const LoginScreen = () => {
                   activeOpacity={0.7}
                 >
                   <LinearGradient
-                    colors={['#36D592', '#13BC71']}
+                    colors={theme.colors.gradients.primary}
                     style={styles.backButton}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
@@ -186,14 +187,12 @@ const LoginScreen = () => {
               {/* Title Section */}
               <View className="mb-12">
                 <Text 
-                  className="text-5xl text-neutral-dark mb-3"
-                  style={{ fontFamily: 'Poppins-Bold' }}
+                  style={[styles.title, { fontFamily: theme.typography.fontFamily.bold }]}
                 >
                   Welcome back
                 </Text>
                 <Text 
-                  className="text-lg text-neutral-deep"
-                  style={{ fontFamily: 'Poppins-Medium' }}
+                  style={[styles.subtitle, { fontFamily: theme.typography.fontFamily.medium }]}
                 >
                   Continue your mindful journey
                 </Text>
@@ -204,28 +203,27 @@ const LoginScreen = () => {
                 {/* Email Field */}
                 <View className="mb-6">
                   <Text 
-                    className="text-neutral-deep mb-3 text-sm tracking-wide"
-                    style={{ fontFamily: 'Poppins-SemiBold' }}
+                    style={[styles.label, { fontFamily: theme.typography.fontFamily.semibold }]}
                   >
                     EMAIL ADDRESS
                   </Text>
                   <View
-                    className={`bg-white/80 backdrop-blur rounded-2xl border-2 ${
-                      focusedField === 'email' ? 'border-pastel-mint-400' : 'border-neutral-light'
-                    } overflow-hidden`}
+                    style={[
+                      styles.inputContainer,
+                      focusedField === 'email' && styles.inputContainerFocused
+                    ]}
                   >
                     <TextInput
                       value={email}
                       onChangeText={setEmail}
                       placeholder="your@email.com"
-                      placeholderTextColor="#C5BFD3"
+                      placeholderTextColor={theme.colors.text.light}
                       keyboardType="email-address"
                       autoCapitalize="none"
                       autoCorrect={false}
                       onFocus={() => setFocusedField('email')}
                       onBlur={() => setFocusedField('')}
-                      className="px-5 py-4 text-neutral-dark text-base"
-                      style={{ fontFamily: 'Poppins-Medium' }}
+                      style={[styles.input, { fontFamily: theme.typography.fontFamily.medium }]}
                     />
                   </View>
                 </View>
@@ -233,28 +231,27 @@ const LoginScreen = () => {
                 {/* Password Field */}
                 <View className="mb-8">
                   <Text 
-                    className="text-neutral-deep mb-3 text-sm tracking-wide"
-                    style={{ fontFamily: 'Poppins-SemiBold' }}
+                    style={[styles.label, { fontFamily: theme.typography.fontFamily.semibold }]}
                   >
                     PASSWORD
                   </Text>
                   <View
-                    className={`bg-white/80 backdrop-blur rounded-2xl border-2 ${
-                      focusedField === 'password' ? 'border-pastel-mint-400' : 'border-neutral-light'
-                    } overflow-hidden`}
+                    style={[
+                      styles.inputContainer,
+                      focusedField === 'password' && styles.inputContainerFocused
+                    ]}
                   >
                     <TextInput
                       value={password}
                       onChangeText={setPassword}
                       placeholder="Enter your password"
-                      placeholderTextColor="#C5BFD3"
+                      placeholderTextColor={theme.colors.text.light}
                       secureTextEntry
                       autoCapitalize="none"
                       autoCorrect={false}
                       onFocus={() => setFocusedField('password')}
                       onBlur={() => setFocusedField('')}
-                      className="px-5 py-4 text-neutral-dark text-base"
-                      style={{ fontFamily: 'Poppins-Medium' }}
+                      style={[styles.input, { fontFamily: theme.typography.fontFamily.medium }]}
                     />
                   </View>
                 </View>
@@ -265,8 +262,7 @@ const LoginScreen = () => {
                   className="mb-8"
                 >
                   <Text 
-                    className="text-pastel-mint-600 text-base text-right"
-                    style={{ fontFamily: 'Poppins-Medium' }}
+                    style={[styles.forgotPassword, { fontFamily: theme.typography.fontFamily.medium }]}
                   >
                     Forgot your password?
                   </Text>
@@ -275,14 +271,13 @@ const LoginScreen = () => {
                 {/* Error Message */}
                 {error && (
                   <Animated.View
-                    className="bg-pastel-rose-50 border border-pastel-rose-200 rounded-2xl p-4 mb-6"
-                    style={{
-                      transform: [{ scale: pulseAnim }],
-                    }}
+                    style={[
+                      styles.errorContainer,
+                      { transform: [{ scale: pulseAnim }] }
+                    ]}
                   >
                     <Text 
-                      className="text-pastel-rose-700 text-center text-sm"
-                      style={{ fontFamily: 'Poppins-Medium' }}
+                      style={[styles.errorText, { fontFamily: theme.typography.fontFamily.medium }]}
                     >
                       {error}
                     </Text>
@@ -304,8 +299,8 @@ const LoginScreen = () => {
                     <LinearGradient
                       colors={
                         loading || !email.trim() || !password
-                          ? ['#E9E5F0', '#E9E5F0']
-                          : ['#36D592', '#13BC71']
+                          ? [theme.colors.accent, theme.colors.accent]
+                          : theme.colors.gradients.primary
                       }
                       style={styles.loginButton}
                       start={{ x: 0, y: 0 }}
@@ -315,8 +310,7 @@ const LoginScreen = () => {
                         <ActivityIndicator color="white" size="small" />
                       ) : (
                         <Text 
-                          className="text-white text-lg"
-                          style={{ fontFamily: 'Poppins-Bold' }}
+                          style={[styles.buttonText, { fontFamily: theme.typography.fontFamily.bold }]}
                         >
                           Sign In
                         </Text>
@@ -328,19 +322,17 @@ const LoginScreen = () => {
                 {/* Sign Up Section */}
                 <View className="items-center pb-8">
                   <Text 
-                    className="text-neutral-deep mb-4 text-base"
-                    style={{ fontFamily: 'Poppins-Regular' }}
+                    style={[styles.signupPrompt, { fontFamily: theme.typography.fontFamily.regular }]}
                   >
                     New to JournalAI?
                   </Text>
                   <TouchableOpacity
                     onPress={() => navigation.navigate('Signup')}
-                    className="bg-white/40 backdrop-blur px-8 py-3 rounded-3xl border-2 border-pastel-lavender-300"
+                    style={styles.signupButton}
                     activeOpacity={0.7}
                   >
                     <Text 
-                      className="text-pastel-lavender-700 text-base"
-                      style={{ fontFamily: 'Poppins-Bold' }}
+                      style={[styles.signupButtonText, { fontFamily: theme.typography.fontFamily.bold }]}
                     >
                       Create Account
                     </Text>
@@ -367,6 +359,76 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  title: {
+    fontSize: theme.typography.fontSize.xxxl + 8,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.sm,
+  },
+  subtitle: {
+    fontSize: theme.typography.fontSize.lg,
+    color: theme.colors.text.secondary,
+  },
+  label: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing.sm,
+    letterSpacing: 1,
+  },
+  inputContainer: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 2,
+    borderColor: theme.colors.accent,
+    overflow: 'hidden',
+  },
+  inputContainerFocused: {
+    borderColor: theme.colors.primary,
+  },
+  input: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    fontSize: theme.typography.fontSize.md,
+    color: theme.colors.text.primary,
+  },
+  forgotPassword: {
+    fontSize: theme.typography.fontSize.md,
+    color: theme.colors.text.secondary,
+    textAlign: 'right',
+  },
+  errorContainer: {
+    backgroundColor: theme.colors.error + '10',
+    borderRadius: theme.borderRadius.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.error + '30',
+    padding: theme.spacing.md,
+    marginBottom: theme.spacing.lg,
+  },
+  errorText: {
+    fontSize: theme.typography.fontSize.sm,
+    color: theme.colors.error,
+    textAlign: 'center',
+  },
+  buttonText: {
+    fontSize: theme.typography.fontSize.lg,
+    color: theme.colors.text.inverse,
+  },
+  signupPrompt: {
+    fontSize: theme.typography.fontSize.md,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing.md,
+  },
+  signupButton: {
+    backgroundColor: theme.colors.surface + '40',
+    paddingHorizontal: theme.spacing.xl,
+    paddingVertical: theme.spacing.sm,
+    borderRadius: theme.borderRadius.xl,
+    borderWidth: 2,
+    borderColor: theme.colors.accent,
+  },
+  signupButtonText: {
+    fontSize: theme.typography.fontSize.md,
+    color: theme.colors.text.primary,
   },
 });
 

@@ -1,11 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  View, 
+  Text, 
+  ScrollView, 
+  TouchableOpacity, 
+  ActivityIndicator,
+  Animated,
+  StyleSheet,
+  Dimensions,
+  Pressable,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { reviewsAPI } from '../services/api';
 import { formatUTCToLocalDate } from '../utils/timezone';
+import { theme, elevation } from '../theme';
+import { AnimatedCard } from '../components/ui';
+
+const { width } = Dimensions.get('window');
 
 type RouteParams = {
   ReviewDetail: {
@@ -19,11 +33,36 @@ const ReviewDetailScreen = () => {
   const route = useRoute<RouteProp<RouteParams, 'ReviewDetail'>>();
   const [review, setReview] = useState<any>(route.params?.reviewData || null);
   const [loading, setLoading] = useState(!route.params?.reviewData);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
 
   useEffect(() => {
     if (route.params?.reviewId && !route.params?.reviewData) {
       fetchReview();
     }
+    
+    // Entrance animations
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: theme.animation.duration.normal,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: theme.animation.duration.normal,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 20,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+    ]).start();
   }, [route.params?.reviewId]);
 
   const fetchReview = async () => {
@@ -39,7 +78,10 @@ const ReviewDetailScreen = () => {
   };
 
   const formatDate = (dateString: string) => {
-    // If it's a full timestamp, use it directly
+    if (!dateString) {
+      return 'Date not available';
+    }
+    
     if (dateString.includes('T')) {
       const date = new Date(dateString);
       return date.toLocaleDateString('en-US', { 
@@ -50,10 +92,9 @@ const ReviewDetailScreen = () => {
       });
     }
     
-    // For date-only strings (YYYY-MM-DD), parse components to avoid timezone issues
-    const [year, month, day] = dateString.split('-').map(Number);
-    // Create date in local timezone (month is 0-indexed in JS)
-    const date = new Date(year, month - 1, day);
+    // If it's just a date (YYYY-MM-DD), treat it as local date
+    const [year, month, day] = dateString.split('-');
+    const date = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
     return date.toLocaleDateString('en-US', { 
       weekday: 'long',
       year: 'numeric',
@@ -62,448 +103,560 @@ const ReviewDetailScreen = () => {
     });
   };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return '#36D592';
-    if (score >= 60) return '#FFD700';
-    if (score >= 40) return '#FF7849';
-    return '#FF4444';
-  };
-
-  const getEmotionConfig = (emotion: string) => {
-    const emotions: Record<string, { color: string; bgColor: string; label: string; icon: string }> = {
-      energized: { color: '#FF7849', bgColor: '#FF784920', label: 'Energized', icon: '⚡' },
-      happy: { color: '#FFD700', bgColor: '#FFD70020', label: 'Happy', icon: '😊' },
-      content: { color: '#36D592', bgColor: '#36D59220', label: 'Content', icon: '😌' },
-      calm: { color: '#87CEEB', bgColor: '#87CEEB20', label: 'Calm', icon: '🧘' },
-      focused: { color: '#4169E1', bgColor: '#4169E120', label: 'Focused', icon: '🎯' },
-      anxious: { color: '#FF6B6B', bgColor: '#FF6B6B20', label: 'Anxious', icon: '😟' },
-      stressed: { color: '#FF4444', bgColor: '#FF444420', label: 'Stressed', icon: '😣' },
-      sad: { color: '#6B5B95', bgColor: '#6B5B9520', label: 'Sad', icon: '😢' },
-      frustrated: { color: '#DC143C', bgColor: '#DC143C20', label: 'Frustrated', icon: '😤' },
-      tired: { color: '#9E9E9E', bgColor: '#9E9E9E20', label: 'Tired', icon: '😴' },
+  const getEmotionalColorInfo = (emotionalColor: string) => {
+    const emotionMap: { [key: string]: { label: string; color: string; icon: string } } = {
+      'energized': { label: 'Energized', color: '#FFB84D', icon: '⚡' },
+      'happy': { label: 'Happy', color: theme.colors.success, icon: '😊' },
+      'content': { label: 'Content', color: '#7DC383', icon: '😌' },
+      'calm': { label: 'Calm', color: '#98A1BC', icon: '🧘' },
+      'focused': { label: 'Focused', color: '#6B8EE5', icon: '🎯' },
+      'anxious': { label: 'Anxious', color: theme.colors.warning, icon: '😟' },
+      'stressed': { label: 'Stressed', color: '#FF8A80', icon: '😣' },
+      'sad': { label: 'Sad', color: '#9E9E9E', icon: '😢' },
+      'frustrated': { label: 'Frustrated', color: theme.colors.error, icon: '😤' },
+      'tired': { label: 'Tired', color: '#B8BFD0', icon: '😴' },
+      // Fallback for old format
+      'positive': { label: 'Positive', color: theme.colors.success, icon: '😊' },
+      'negative': { label: 'Negative', color: theme.colors.error, icon: '😢' },
+      'neutral': { label: 'Neutral', color: theme.colors.secondary, icon: '😐' },
+      'mixed': { label: 'Mixed', color: theme.colors.warning, icon: '🤔' },
     };
-    return emotions[emotion] || emotions.content;
+    return emotionMap[emotionalColor?.toLowerCase()] || emotionMap.neutral;
   };
 
-  const renderDailyReview = () => {
-    const content = review.content;
+  const toggleSection = (section: string) => {
+    const newExpanded = new Set(expandedSections);
+    if (newExpanded.has(section)) {
+      newExpanded.delete(section);
+    } else {
+      newExpanded.add(section);
+    }
+    setExpandedSections(newExpanded);
+  };
+
+  const renderSection = (
+    title: string,
+    content: string | string[],
+    color: string,
+    sectionKey: string
+  ) => {
+    if (!content || (Array.isArray(content) && content.length === 0)) return null;
+    
+    const isExpanded = expandedSections.has(sectionKey);
+    const isArray = Array.isArray(content);
+    const hasMoreContent = isArray ? content.length > 2 : content.length > 150;
+    
     return (
-      <>
-        {/* Day Overview */}
-        <View className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-4 border border-neutral-light">
-          <View className="flex-row items-center mb-3">
-            <View className="w-8 h-8 bg-blue-100 rounded-lg items-center justify-center mr-3">
-              <Svg width="18" height="18" viewBox="0 0 24 24">
-                <Path
-                  d="M8 7V3M16 7V3M3 11h18M5 7h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V9a2 2 0 012-2z"
-                  stroke="#3B82F6"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  fill="none"
-                />
-              </Svg>
-            </View>
-            <Text 
-              className="text-lg text-neutral-dark"
-              style={{ fontFamily: 'Poppins-SemiBold' }}
-            >
-              What Happened Today
-            </Text>
+      <AnimatedCard
+        variant="elevated"
+        animationType="slide"
+        delay={200}
+        style={styles.sectionCard}
+      >
+        <Pressable
+          onPress={() => hasMoreContent && toggleSection(sectionKey)}
+          style={styles.sectionHeader}
+        >
+          <View style={[styles.sectionIcon, { backgroundColor: `${color}20` }]}>
+            <View style={styles.sectionIconDot} />
           </View>
-          <Text 
-            className="text-base text-neutral-deep leading-6"
-            style={{ fontFamily: 'Poppins-Regular' }}
-          >
-            {content.day_overview || content.summary}
-          </Text>
+          <Text style={styles.sectionTitle}>{title}</Text>
+          {hasMoreContent && (
+            <Svg width="20" height="20" viewBox="0 0 24 24" style={[
+              styles.expandIcon,
+              isExpanded && styles.expandIconRotated
+            ]}>
+              <Path
+                d="M7 10l5 5 5-5"
+                stroke={theme.colors.text.secondary}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            </Svg>
+          )}
+        </Pressable>
+        
+        <View style={styles.sectionContent}>
+          {isArray ? (
+            content.slice(0, isExpanded ? undefined : 2).map((item, index) => (
+              <View key={index} style={styles.listItem}>
+                <Text style={styles.listDot}>•</Text>
+                <Text style={styles.listText}>{item}</Text>
+              </View>
+            ))
+          ) : (
+            <Text 
+              style={styles.contentText}
+              numberOfLines={isExpanded ? undefined : 3}
+            >
+              {content}
+            </Text>
+          )}
         </View>
-
-        {/* Achievements */}
-        {content.achievements?.length > 0 && (
-          <View className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-4 border border-neutral-light">
-            <View className="flex-row items-center mb-3">
-              <View className="w-8 h-8 bg-green-100 rounded-lg items-center justify-center mr-3">
-                <Svg width="18" height="18" viewBox="0 0 24 24">
-                  <Path
-                    d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-                    fill="#36D592"
-                  />
-                </Svg>
-              </View>
-              <Text 
-                className="text-lg text-neutral-dark"
-                style={{ fontFamily: 'Poppins-SemiBold' }}
-              >
-                Achievements
-              </Text>
-            </View>
-            {content.achievements.map((achievement: string, index: number) => (
-              <View key={index} className="flex-row items-start mb-2">
-                <Text className="text-green-500 mr-2">•</Text>
-                <Text 
-                  className="text-base text-neutral-deep flex-1"
-                  style={{ fontFamily: 'Poppins-Regular' }}
-                >
-                  {achievement}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Areas for Improvement */}
-        {content.areas_for_improvement?.length > 0 && (
-          <View className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-4 border border-neutral-light">
-            <View className="flex-row items-center mb-3">
-              <View className="w-8 h-8 bg-orange-100 rounded-lg items-center justify-center mr-3">
-                <Svg width="18" height="18" viewBox="0 0 24 24">
-                  <Path
-                    d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"
-                    stroke="#FF7849"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    fill="none"
-                  />
-                </Svg>
-              </View>
-              <Text 
-                className="text-lg text-neutral-dark"
-                style={{ fontFamily: 'Poppins-SemiBold' }}
-              >
-                Areas for Improvement
-              </Text>
-            </View>
-            {content.areas_for_improvement.map((area: string, index: number) => (
-              <View key={index} className="flex-row items-start mb-2">
-                <Text className="text-orange-500 mr-2">•</Text>
-                <Text 
-                  className="text-base text-neutral-deep flex-1"
-                  style={{ fontFamily: 'Poppins-Regular' }}
-                >
-                  {area}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Goal Progress */}
-        {content.goal_progress && (
-          <View className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-4 border border-neutral-light">
-            <Text 
-              className="text-lg text-neutral-dark mb-3"
-              style={{ fontFamily: 'Poppins-SemiBold' }}
-            >
-              Goal Progress
-            </Text>
-            {Object.entries(content.goal_progress).map(([category, progress]) => (
-              <View key={category} className="mb-3">
-                <Text 
-                  className="text-base text-neutral-dark capitalize mb-1"
-                  style={{ fontFamily: 'Poppins-Medium' }}
-                >
-                  {category}
-                </Text>
-                <Text 
-                  className="text-sm text-neutral-deep"
-                  style={{ fontFamily: 'Poppins-Regular' }}
-                >
-                  {progress as string}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Tomorrow's Recommendations */}
-        {content.tomorrow_recommendations?.length > 0 && (
-          <View className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-4 border border-neutral-light">
-            <View className="flex-row items-center mb-3">
-              <View className="w-8 h-8 bg-purple-100 rounded-lg items-center justify-center mr-3">
-                <Svg width="18" height="18" viewBox="0 0 24 24">
-                  <Path
-                    d="M12 2v10l4 2M12 2L8 4M12 2l4 2"
-                    stroke="#B483F0"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <Circle cx="12" cy="12" r="10" stroke="#B483F0" strokeWidth="2" fill="none" />
-                </Svg>
-              </View>
-              <Text 
-                className="text-lg text-neutral-dark"
-                style={{ fontFamily: 'Poppins-SemiBold' }}
-              >
-                Tomorrow's Recommendations
-              </Text>
-            </View>
-            {content.tomorrow_recommendations.map((rec: string, index: number) => (
-              <View key={index} className="flex-row items-start mb-2">
-                <Text className="text-purple-500 mr-2">→</Text>
-                <Text 
-                  className="text-base text-neutral-deep flex-1"
-                  style={{ fontFamily: 'Poppins-Regular' }}
-                >
-                  {rec}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </>
+      </AnimatedCard>
     );
   };
 
-  const renderWeeklyReview = () => {
-    const content = review.content;
+  if (loading) {
     return (
-      <>
-        {/* Week Summary */}
-        <View className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-4 border border-neutral-light">
-          <Text 
-            className="text-lg text-neutral-dark mb-3"
-            style={{ fontFamily: 'Poppins-SemiBold' }}
-          >
-            Week Summary
-          </Text>
-          <Text 
-            className="text-base text-neutral-deep leading-6"
-            style={{ fontFamily: 'Poppins-Regular' }}
-          >
-            {content.week_summary}
-          </Text>
-        </View>
-
-        {/* Daily Scores */}
-        {content.daily_scores?.length > 0 && (
-          <View className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-4 border border-neutral-light">
-            <Text 
-              className="text-lg text-neutral-dark mb-3"
-              style={{ fontFamily: 'Poppins-SemiBold' }}
-            >
-              Daily Scores
-            </Text>
-            <View className="flex-row justify-between">
-              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, index) => (
-                <View key={day} className="items-center">
-                  <Text 
-                    className="text-xs text-neutral-mid mb-1"
-                    style={{ fontFamily: 'Poppins-Regular' }}
-                  >
-                    {day}
-                  </Text>
-                  <View 
-                    className="w-10 h-10 rounded-full items-center justify-center"
-                    style={{ backgroundColor: getScoreColor(content.daily_scores[index] || 0) + '20' }}
-                  >
-                    <Text 
-                      className="text-sm"
-                      style={{ 
-                        fontFamily: 'Poppins-SemiBold',
-                        color: getScoreColor(content.daily_scores[index] || 0)
-                      }}
-                    >
-                      {content.daily_scores[index] || '-'}
-                    </Text>
-                  </View>
-                </View>
-              ))}
-            </View>
+      <SafeAreaView style={styles.container}>
+        <LinearGradient
+          colors={theme.colors.gradients.soft}
+          style={styles.gradient}
+        >
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
           </View>
-        )}
-
-        {/* Top Achievements */}
-        {content.top_achievements?.length > 0 && (
-          <View className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-4 border border-neutral-light">
-            <View className="flex-row items-center mb-3">
-              <View className="w-8 h-8 bg-green-100 rounded-lg items-center justify-center mr-3">
-                <Svg width="18" height="18" viewBox="0 0 24 24">
-                  <Path
-                    d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"
-                    fill="#36D592"
-                  />
-                </Svg>
-              </View>
-              <Text 
-                className="text-lg text-neutral-dark"
-                style={{ fontFamily: 'Poppins-SemiBold' }}
-              >
-                Top Achievements
-              </Text>
-            </View>
-            {content.top_achievements.map((achievement: string, index: number) => (
-              <View key={index} className="flex-row items-start mb-2">
-                <Text className="text-green-500 mr-2">★</Text>
-                <Text 
-                  className="text-base text-neutral-deep flex-1"
-                  style={{ fontFamily: 'Poppins-Regular' }}
-                >
-                  {achievement}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Patterns */}
-        {content.patterns && (
-          <View className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-4 border border-neutral-light">
-            <Text 
-              className="text-lg text-neutral-dark mb-3"
-              style={{ fontFamily: 'Poppins-SemiBold' }}
-            >
-              Patterns Identified
-            </Text>
-            {Object.entries(content.patterns).map(([type, patterns]) => (
-              <View key={type} className="mb-3">
-                <Text 
-                  className="text-base text-neutral-dark capitalize mb-2"
-                  style={{ fontFamily: 'Poppins-Medium' }}
-                >
-                  {type}
-                </Text>
-                {(patterns as string[]).map((pattern, index) => (
-                  <View key={index} className="flex-row items-start mb-1">
-                    <Text className={type === 'positive' ? "text-green-500 mr-2" : "text-orange-500 mr-2"}>
-                      {type === 'positive' ? '✓' : '!'}
-                    </Text>
-                    <Text 
-                      className="text-sm text-neutral-deep flex-1"
-                      style={{ fontFamily: 'Poppins-Regular' }}
-                    >
-                      {pattern}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ))}
-          </View>
-        )}
-      </>
+        </LinearGradient>
+      </SafeAreaView>
     );
-  };
+  }
 
-  return (
-    <LinearGradient
-      colors={['#F0FDF9', '#FAF8FE', '#FFE8DB']}
-      style={{ flex: 1 }}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-    >
-      <SafeAreaView className="flex-1">
-        <View className="flex-1">
-          {/* Header */}
-          <View className="px-6 pt-4 pb-4 flex-row items-center">
-            <TouchableOpacity 
+  if (!review) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <LinearGradient
+          colors={theme.colors.gradients.soft}
+          style={styles.gradient}
+        >
+          <View style={styles.header}>
+            <TouchableOpacity
               onPress={() => navigation.goBack()}
-              className="mr-4 p-2"
-              activeOpacity={0.7}
+              style={styles.backButton}
             >
               <Svg width="24" height="24" viewBox="0 0 24 24">
                 <Path
-                  d="M19 12H5M12 19l-7-7 7-7"
-                  stroke="#4B5563"
+                  d="M15 18l-6-6 6-6"
+                  stroke={theme.colors.text.primary}
                   strokeWidth="2"
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                  fill="none"
                 />
               </Svg>
             </TouchableOpacity>
-            <Text 
-              className="text-2xl text-neutral-dark flex-1"
-              style={{ fontFamily: 'Poppins-Bold' }}
-            >
-              {review?.type === 'weekly' ? 'Weekly' : 'Daily'} Review
-            </Text>
           </View>
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>Review not found</Text>
+          </View>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
 
-          {loading ? (
-            <View className="flex-1 items-center justify-center">
-              <ActivityIndicator size="large" color="#36D592" />
-            </View>
-          ) : review ? (
-            <ScrollView 
-              className="flex-1 px-6"
-              showsVerticalScrollIndicator={false}
-            >
-              {/* Score and Date Card */}
-              <View 
-                className="bg-white/60 backdrop-blur rounded-2xl p-5 mb-4 border border-neutral-light"
-                style={review.type === 'daily' && review.content.emotional_color ? {
-                  borderColor: getEmotionConfig(review.content.emotional_color).color + '40',
-                  shadowColor: getEmotionConfig(review.content.emotional_color).color,
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.1,
-                  shadowRadius: 8
-                } : {}}
+  // Get emotional color from new format or fallback to old sentiment
+  const emotionalColor = review.content?.emotional_color || review.sentiment || 'neutral';
+  const emotionInfo = getEmotionalColorInfo(emotionalColor);
+  const reviewScore = review.content?.score || review.score || review.mood_score;
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <LinearGradient
+        colors={theme.colors.gradients.soft}
+        style={styles.gradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.backButton}
+          >
+            <Svg width="24" height="24" viewBox="0 0 24 24">
+              <Path
+                d="M15 18l-6-6 6-6"
+                stroke={theme.colors.text.primary}
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            </Svg>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Daily Review</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Date & Sentiment Card */}
+          <Animated.View
+            style={{
+              opacity: fadeAnim,
+              transform: [
+                { translateY: slideAnim },
+                { scale: scaleAnim }
+              ]
+            }}
+          >
+            <AnimatedCard variant="elevated" style={styles.mainCard}>
+              <LinearGradient
+                colors={[`${emotionInfo.color}10`, theme.colors.surface]}
+                style={styles.mainCardGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 0, y: 1 }}
               >
-                <View className="flex-row items-center justify-between mb-3">
-                  <View>
-                    <Text 
-                      className="text-sm text-neutral-mid mb-1"
-                      style={{ fontFamily: 'Poppins-Regular' }}
-                    >
-                      {formatDate(review.date)}
-                    </Text>
-                    <Text 
-                      className="text-2xl text-neutral-dark"
-                      style={{ fontFamily: 'Poppins-Bold' }}
-                    >
-                      Score: {review.type === 'weekly' ? review.content.average_score : review.score}
-                    </Text>
-                    {review.type === 'daily' && review.content.emotional_color && (
-                      <View className="flex-row items-center mt-2">
-                        <Text className="text-lg mr-1">
-                          {getEmotionConfig(review.content.emotional_color).icon}
-                        </Text>
-                        <Text 
-                          className="text-sm"
-                          style={{ 
-                            fontFamily: 'Poppins-Medium',
-                            color: getEmotionConfig(review.content.emotional_color).color
-                          }}
-                        >
-                          Feeling {getEmotionConfig(review.content.emotional_color).label}
-                        </Text>
-                      </View>
-                    )}
+                <Text style={styles.date}>{formatDate(review.review_date || review.date)}</Text>
+                
+                <View style={styles.sentimentContainer}>
+                  <View style={[styles.sentimentIndicator, { backgroundColor: emotionInfo.color }]}>
+                    <Text style={styles.emotionIcon}>{emotionInfo.icon}</Text>
                   </View>
-                  <View 
-                    className="w-20 h-20 rounded-full items-center justify-center"
-                    style={{ backgroundColor: getScoreColor(review.type === 'weekly' ? review.content.average_score : review.score) }}
-                  >
-                    <Text 
-                      className="text-2xl text-white"
-                      style={{ fontFamily: 'Poppins-Bold' }}
-                    >
-                      {review.type === 'weekly' ? Math.round(review.content.average_score) : review.score}
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.sentimentLabel}>Emotional State</Text>
+                    <Text style={[styles.sentimentValue, { color: emotionInfo.color }]}>
+                      {emotionInfo.label}
                     </Text>
                   </View>
                 </View>
-              </View>
+                
+                {reviewScore !== undefined && reviewScore !== null && (
+                  <View style={styles.moodContainer}>
+                    <View style={styles.moodBar}>
+                      <Animated.View
+                        style={[
+                          styles.moodFill,
+                          {
+                            width: `${reviewScore}%`,
+                            backgroundColor: emotionInfo.color,
+                          }
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.moodText}>
+                      Day Score: {reviewScore}/100
+                    </Text>
+                  </View>
+                )}
+              </LinearGradient>
+            </AnimatedCard>
+          </Animated.View>
 
-              {/* Review Content */}
-              {review.type === 'daily' ? renderDailyReview() : renderWeeklyReview()}
-
-              {/* Bottom padding for scroll */}
-              <View className="h-8" />
-            </ScrollView>
-          ) : (
-            <View className="flex-1 items-center justify-center px-6">
-              <Text 
-                className="text-lg text-neutral-mid"
-                style={{ fontFamily: 'Poppins-Medium' }}
-              >
-                Review not found
-              </Text>
-            </View>
+          {/* Day Overview / Summary */}
+          {(review.content?.day_overview || review.summary) && renderSection(
+            'Day Overview',
+            review.content?.day_overview || review.summary,
+            theme.colors.primary,
+            'overview'
           )}
-        </View>
-      </SafeAreaView>
-    </LinearGradient>
+
+          {/* Achievements */}
+          {(review.content?.achievements || review.achievements) && renderSection(
+            'Achievements',
+            review.content?.achievements || review.achievements,
+            theme.colors.success,
+            'achievements'
+          )}
+
+          {/* Areas for Improvement */}
+          {review.content?.areas_for_improvement && renderSection(
+            'Areas for Improvement',
+            review.content.areas_for_improvement,
+            theme.colors.warning,
+            'improvement'
+          )}
+
+          {/* Goal Progress */}
+          {review.content?.goal_progress && (
+            <AnimatedCard variant="elevated" style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Goal Progress</Text>
+              <View style={styles.sectionContent}>
+                {Object.entries(review.content.goal_progress).map(([goal, progress]) => (
+                  <View key={goal} style={styles.goalItem}>
+                    <Text style={styles.goalName}>{goal}:</Text>
+                    <Text style={styles.goalProgress}>{progress as string}</Text>
+                  </View>
+                ))}
+              </View>
+            </AnimatedCard>
+          )}
+
+          {/* Tomorrow Recommendations */}
+          {(review.content?.tomorrow_recommendations || review.tomorrow_focus) && renderSection(
+            'Tomorrow\'s Focus',
+            review.content?.tomorrow_recommendations || review.tomorrow_focus,
+            theme.colors.primary,
+            'tomorrow'
+          )}
+
+          {/* Old format fields */}
+          {review.key_topics && renderSection(
+            'Key Topics',
+            review.key_topics,
+            theme.colors.info,
+            'topics'
+          )}
+
+          {review.challenges && renderSection(
+            'Challenges',
+            review.challenges,
+            theme.colors.error,
+            'challenges'
+          )}
+
+          {review.gratitude && renderSection(
+            'Gratitude',
+            review.gratitude,
+            theme.colors.info,
+            'gratitude'
+          )}
+
+          {/* XP Earned */}
+          {(review.content?.xp_earned || (review.skills_developed && review.skills_developed.length > 0)) && (
+            <AnimatedCard variant="elevated" style={styles.skillsCard}>
+              <Text style={styles.skillsTitle}>XP Earned</Text>
+              <View style={styles.skillsGrid}>
+                {review.content?.xp_earned ? (
+                  Object.entries(review.content.xp_earned).map(([skill, xp]) => (
+                    <View key={skill} style={styles.skillBadge}>
+                      <Text style={styles.skillName}>{skill}</Text>
+                      <Text style={styles.skillXP}>+{xp} XP</Text>
+                    </View>
+                  ))
+                ) : (
+                  review.skills_developed.map((skill: any, index: number) => (
+                    <View key={index} style={styles.skillBadge}>
+                      <Text style={styles.skillName}>{skill.skill}</Text>
+                      <Text style={styles.skillXP}>+{skill.xp_gained} XP</Text>
+                    </View>
+                  ))
+                )}
+              </View>
+            </AnimatedCard>
+          )}
+        </ScrollView>
+      </LinearGradient>
+    </SafeAreaView>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  gradient: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyText: {
+    fontSize: theme.typography.fontSize.lg,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...elevation(2),
+  },
+  headerTitle: {
+    fontSize: theme.typography.fontSize.xl,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingBottom: theme.spacing.xxl,
+  },
+  mainCard: {
+    marginBottom: theme.spacing.lg,
+    padding: 0,
+    overflow: 'hidden',
+  },
+  mainCardGradient: {
+    padding: theme.spacing.lg,
+    borderRadius: theme.borderRadius.lg,
+  },
+  date: {
+    fontSize: theme.typography.fontSize.lg,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.md,
+  },
+  sentimentContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  sentimentIndicator: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: theme.spacing.md,
+    opacity: 0.2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emotionIcon: {
+    fontSize: 24,
+  },
+  sentimentLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+  },
+  sentimentValue: {
+    fontSize: theme.typography.fontSize.lg,
+    fontFamily: theme.typography.fontFamily.semibold,
+  },
+  moodContainer: {
+    marginTop: theme.spacing.sm,
+  },
+  moodBar: {
+    height: 6,
+    backgroundColor: theme.colors.overlay,
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  moodFill: {
+    height: '100%',
+    borderRadius: 3,
+  },
+  moodText: {
+    fontSize: theme.typography.fontSize.xs,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing.xs,
+  },
+  sectionCard: {
+    marginBottom: theme.spacing.md,
+    padding: theme.spacing.lg,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  sectionIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: theme.borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing.sm,
+  },
+  sectionIconDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: theme.colors.primary,
+  },
+  sectionTitle: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    flex: 1,
+  },
+  expandIcon: {
+    transform: [{ rotate: '0deg' }],
+  },
+  expandIconRotated: {
+    transform: [{ rotate: '180deg' }],
+  },
+  sectionContent: {
+    marginLeft: 44,
+  },
+  contentText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    lineHeight: 20,
+  },
+  listItem: {
+    flexDirection: 'row',
+    marginBottom: theme.spacing.xs,
+  },
+  listDot: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    marginRight: theme.spacing.sm,
+  },
+  listText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    flex: 1,
+    lineHeight: 20,
+  },
+  skillsCard: {
+    marginTop: theme.spacing.md,
+    padding: theme.spacing.lg,
+  },
+  skillsTitle: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.md,
+  },
+  skillsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: theme.spacing.sm,
+  },
+  skillBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.accent,
+    paddingHorizontal: theme.spacing.md,
+    paddingVertical: theme.spacing.xs,
+    borderRadius: theme.borderRadius.full,
+  },
+  skillName: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.text.primary,
+    marginRight: theme.spacing.xs,
+  },
+  skillXP: {
+    fontSize: theme.typography.fontSize.xs,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.success,
+  },
+  goalItem: {
+    marginBottom: theme.spacing.md,
+  },
+  goalName: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.xs,
+  },
+  goalProgress: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    lineHeight: 20,
+  },
+});
 
 export default ReviewDetailScreen;

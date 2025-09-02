@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Path } from 'react-native-svg';
+import { theme } from '../theme';
 
 const { width, height } = Dimensions.get('window');
 
@@ -55,10 +56,10 @@ const WelcomeScreen = () => {
 
   return (
     <LinearGradient
-      colors={['#F0FDF9', '#FAF8FE', '#FFE8DB']}
+      colors={theme.colors.gradients.soft}
       style={{ flex: 1 }}
       start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
+      end={{ x: 0, y: 1 }}
     >
       <SafeAreaView className="flex-1">
         {/* Background decorative elements */}
@@ -75,8 +76,8 @@ const WelcomeScreen = () => {
             }}
           >
             <Svg width="200" height="200" viewBox="0 0 200 200">
-              <Circle cx="100" cy="100" r="80" fill="#36D592" opacity="0.2" />
-              <Circle cx="100" cy="100" r="60" fill="#FF7849" opacity="0.1" />
+              <Circle cx="100" cy="100" r="80" fill={theme.colors.primary} opacity="0.1" />
+              <Circle cx="100" cy="100" r="60" fill={theme.colors.secondary} opacity="0.05" />
             </Svg>
           </Animated.View>
           
@@ -92,8 +93,8 @@ const WelcomeScreen = () => {
             }}
           >
             <Svg width="300" height="300" viewBox="0 0 300 300">
-              <Circle cx="150" cy="150" r="120" fill="#B483F0" opacity="0.15" />
-              <Circle cx="150" cy="150" r="80" fill="#36D592" opacity="0.1" />
+              <Circle cx="150" cy="150" r="120" fill={theme.colors.secondary} opacity="0.08" />
+              <Circle cx="150" cy="150" r="80" fill={theme.colors.primary} opacity="0.05" />
             </Svg>
           </Animated.View>
         </View>
@@ -118,7 +119,7 @@ const WelcomeScreen = () => {
               {/* App Icon/Logo */}
               <View className="mb-6">
                 <LinearGradient
-                  colors={['#36D592', '#13BC71']}
+                  colors={theme.colors.gradients.primary}
                   style={styles.logoGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
@@ -200,7 +201,7 @@ const WelcomeScreen = () => {
                 className="overflow-hidden rounded-3xl"
               >
                 <LinearGradient
-                  colors={['#36D592', '#13BC71']}
+                  colors={theme.colors.gradients.primary}
                   style={styles.button}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}

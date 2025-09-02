@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -10,17 +10,20 @@ import {
   ActivityIndicator,
   Dimensions,
   RefreshControl,
+  Animated,
+  Pressable,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout, updateUser } from '../store/slices/authSlice';
 import { AppDispatch, RootState } from '../store';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Path, Circle } from 'react-native-svg';
-import { BlurView } from 'expo-blur';
+import Svg, { Path } from 'react-native-svg';
 import { formatUTCToLocal } from '../utils/timezone';
 import { API_CONFIG } from '../config/api';
 import { useFocusEffect } from '@react-navigation/native';
+import { theme, elevation } from '../theme';
+import { AnimatedCard, AnimatedButton } from '../components/ui';
 
 const { width } = Dimensions.get('window');
 
@@ -38,6 +41,11 @@ const ProfileScreen = () => {
   const [editedYearlyGoals, setEditedYearlyGoals] = useState('');
   const [editedTenYearVision, setEditedTenYearVision] = useState('');
 
+  // Animation refs
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const scaleAnim = useRef(new Animated.Value(0.95)).current;
+
   // Initialize form data from user
   useEffect(() => {
     if (user) {
@@ -47,6 +55,36 @@ const ProfileScreen = () => {
       setEditedTenYearVision(user.goals?.ten_year_vision || '');
     }
   }, [user]);
+
+  // Entrance animations on focus
+  useFocusEffect(
+    useCallback(() => {
+      fadeAnim.setValue(0);
+      slideAnim.setValue(30);
+      scaleAnim.setValue(0.95);
+      
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: theme.animation.duration.normal,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: theme.animation.duration.normal,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          tension: 20,
+          friction: 7,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      
+      fetchUserData(false);
+    }, [])
+  );
 
   // Fetch fresh user data
   const fetchUserData = useCallback(async (showLoader = true) => {
@@ -76,13 +114,6 @@ const ProfileScreen = () => {
     }
   }, [token, dispatch]);
 
-  // Fetch fresh data when screen is focused
-  useFocusEffect(
-    useCallback(() => {
-      fetchUserData(false);
-    }, [fetchUserData])
-  );
-
   const onRefresh = useCallback(() => {
     setRefreshing(true);
     fetchUserData(false);
@@ -107,35 +138,22 @@ const ProfileScreen = () => {
   };
 
   const handleSave = async () => {
-    console.log('Token in ProfileScreen:', token);
-    console.log('Token type:', typeof token);
-    console.log('Token exists:', !!token);
-    
-    if (!token) {
-      Alert.alert('Error', 'Authentication token not found. Please login again.');
-      return;
-    }
-    
     setLoading(true);
     try {
-      const updateData = {
-        name: editedName,
-        goals: {
-          current_goals: editedCurrentGoals,
-          yearly_goals: editedYearlyGoals,
-          ten_year_vision: editedTenYearVision,
-        },
-      };
-
-      console.log('Sending request with Authorization:', `Bearer ${token}`);
-      
       const response = await fetch(`${API_CONFIG.API_BASE}/users/me`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: {
-          'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify(updateData),
+        body: JSON.stringify({
+          name: editedName,
+          goals: {
+            current_goals: editedCurrentGoals,
+            yearly_goals: editedYearlyGoals,
+            ten_year_vision: editedTenYearVision,
+          }
+        }),
       });
 
       if (response.ok) {
@@ -144,8 +162,7 @@ const ProfileScreen = () => {
         setIsEditing(false);
         Alert.alert('Success', 'Profile updated successfully');
       } else {
-        const error = await response.json();
-        Alert.alert('Error', error.detail || 'Failed to update profile');
+        throw new Error('Failed to update profile');
       }
     } catch (error) {
       console.error('Error updating profile:', error);
@@ -155,451 +172,415 @@ const ProfileScreen = () => {
     }
   };
 
-  const handleCancel = () => {
-    setEditedName(user?.name || '');
-    setEditedCurrentGoals(user?.goals?.current_goals || '');
-    setEditedYearlyGoals(user?.goals?.yearly_goals || '');
-    setEditedTenYearVision(user?.goals?.ten_year_vision || '');
-    setIsEditing(false);
+  const formatMemberSince = (date: string) => {
+    if (!date) return 'Recently joined';
+    const memberDate = new Date(date);
+    return `Member since ${memberDate.toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}`;
   };
 
-
+  if (dataLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <LinearGradient
+          colors={theme.colors.gradients.soft}
+          style={styles.gradient}
+        >
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+          </View>
+        </LinearGradient>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <LinearGradient
-      colors={['#F0FDF9', '#FAF8FE', '#FFE8DB']}
-      style={{ flex: 1 }}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-    >
-      <SafeAreaView className="flex-1">
-        {dataLoading && !user ? (
-          <View className="flex-1 justify-center items-center">
-            <ActivityIndicator size="large" color="#36D592" />
-            <Text className="text-neutral-mid text-sm mt-2" style={{ fontFamily: 'Poppins-Regular' }}>
-              Loading profile...
-            </Text>
-          </View>
-        ) : (
-        <ScrollView 
-          className="flex-1"
+    <SafeAreaView style={styles.container}>
+      <LinearGradient
+        colors={theme.colors.gradients.soft}
+        style={styles.gradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+      >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 120 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={['#36D592']}
-              tintColor="#36D592"
+              tintColor={theme.colors.primary}
             />
           }
         >
-          <View className="px-6">
-            {/* Header */}
-            <View className="pt-4 pb-2">
-              <View className="flex-row justify-between items-center px-2">
-                <View>
-                  <Text 
-                    className="text-3xl text-neutral-dark"
-                    style={{ fontFamily: 'Poppins-Bold' }}
-                  >
-                    Profile
-                  </Text>
-                  <Text 
-                    className="text-sm text-neutral-mid mt-1"
-                    style={{ fontFamily: 'Poppins-Regular' }}
-                  >
-                    Manage your personal information
-                  </Text>
-                </View>
-                {!isEditing ? (
-                  <TouchableOpacity
-                    onPress={() => setIsEditing(true)}
-                    activeOpacity={0.8}
-                  >
-                    <LinearGradient
-                      colors={['#36D592', '#13BC71']}
-                      style={styles.editButton}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                    >
-                      <Svg width="18" height="18" viewBox="0 0 24 24">
-                        <Path
-                          d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"
-                          fill="white"
-                        />
-                      </Svg>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                ) : (
-                  <View className="flex-row gap-2">
-                    <TouchableOpacity
-                      onPress={handleCancel}
-                      activeOpacity={0.8}
-                      disabled={loading}
-                    >
-                      <View style={styles.cancelButton}>
-                        <Text 
-                          className="text-neutral-deep text-sm"
-                          style={{ fontFamily: 'Poppins-SemiBold' }}
-                        >
-                          Cancel
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={handleSave}
-                      activeOpacity={0.8}
-                      disabled={loading}
-                    >
-                      <LinearGradient
-                        colors={['#36D592', '#13BC71']}
-                        style={styles.saveButton}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                      >
-                        {loading ? (
-                          <ActivityIndicator color="white" size="small" />
-                        ) : (
-                          <Text 
-                            className="text-white text-sm"
-                            style={{ fontFamily: 'Poppins-Bold' }}
-                          >
-                            Save
-                          </Text>
-                        )}
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </View>
-                )}
+          {/* Header */}
+          <Animated.View 
+            style={[
+              styles.header,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }]
+              }
+            ]}
+          >
+            <View style={styles.headerTop}>
+              <Text style={styles.title}>Profile</Text>
+              <TouchableOpacity
+                onPress={() => setIsEditing(!isEditing)}
+                style={styles.editButton}
+              >
+                <Svg width="20" height="20" viewBox="0 0 24 24">
+                  <Path
+                    d={isEditing ? 
+                      "M5 13l4 4L19 7" : 
+                      "M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"
+                    }
+                    stroke={theme.colors.text.primary}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    fill="none"
+                  />
+                </Svg>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+
+          {/* User Info Card */}
+          <Animated.View
+            style={{
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }]
+            }}
+          >
+            <AnimatedCard variant="elevated" style={styles.userCard}>
+              <View style={styles.userAvatar}>
+                <Text style={styles.avatarText}>
+                  {user?.name?.charAt(0)?.toUpperCase() || '?'}
+                </Text>
               </View>
-            </View>
-
-
-            {/* Basic Information Section */}
-            <View className="mb-6">
-              <Text 
-                className="text-neutral-dark text-lg mb-4"
-                style={{ fontFamily: 'Poppins-SemiBold' }}
-              >
-                Basic Information
-              </Text>
               
-              <BlurView intensity={30} tint="light" style={styles.infoCard}>
-                <View className="p-5">
-                  {/* Name Field */}
-                  <View className="mb-5">
-                    <Text 
-                      className="text-neutral-mid text-xs mb-2 uppercase tracking-wide"
-                      style={{ fontFamily: 'Poppins-SemiBold' }}
-                    >
-                      Name
-                    </Text>
-                    {isEditing ? (
-                      <TextInput
-                        value={editedName}
-                        onChangeText={setEditedName}
-                        style={[styles.input, { fontFamily: 'Poppins-Medium' }]}
-                        placeholder="Enter your name"
-                        placeholderTextColor="#C5BFD3"
-                      />
-                    ) : (
-                      <Text 
-                        className="text-neutral-dark text-base"
-                        style={{ fontFamily: 'Poppins-Medium' }}
-                      >
-                        {user?.name || 'Not set'}
-                      </Text>
-                    )}
-                  </View>
-
-                  {/* Email Field */}
-                  <View>
-                    <Text 
-                      className="text-neutral-mid text-xs mb-2 uppercase tracking-wide"
-                      style={{ fontFamily: 'Poppins-SemiBold' }}
-                    >
-                      Email
-                    </Text>
-                    <Text 
-                      className="text-neutral-dark text-base"
-                      style={{ fontFamily: 'Poppins-Medium' }}
-                    >
-                      {user?.email || 'Not set'}
-                    </Text>
-                  </View>
-                </View>
-              </BlurView>
-            </View>
-
-            {/* Goals Section */}
-            <View className="mb-6">
-              <Text 
-                className="text-neutral-dark text-lg mb-4"
-                style={{ fontFamily: 'Poppins-SemiBold' }}
-              >
-                Your Goals & Vision
-              </Text>
+              {isEditing ? (
+                <TextInput
+                  style={styles.nameInput}
+                  value={editedName}
+                  onChangeText={setEditedName}
+                  placeholder="Your name"
+                  placeholderTextColor={theme.colors.text.light}
+                />
+              ) : (
+                <Text style={styles.userName}>
+                  {user?.name || 'Anonymous User'}
+                </Text>
+              )}
               
-              {/* Current Goals */}
-              <BlurView intensity={30} tint="light" style={[styles.infoCard, { marginBottom: 16 }]}>
-                <View className="p-5">
-                  <View className="flex-row items-center mb-2">
-                    <View className="w-8 h-8 rounded-full bg-pastel-mint-100 items-center justify-center mr-3">
-                      <Svg width="16" height="16" viewBox="0 0 24 24">
-                        <Circle cx="12" cy="12" r="10" stroke="#36D592" strokeWidth="2" fill="none"/>
-                        <Circle cx="12" cy="12" r="3" fill="#36D592"/>
-                      </Svg>
-                    </View>
-                    <Text 
-                      className="text-neutral-mid text-xs uppercase tracking-wide"
-                      style={{ fontFamily: 'Poppins-SemiBold' }}
-                    >
-                      Current Goals (3-6 months)
-                    </Text>
-                  </View>
-                  {isEditing ? (
-                    <TextInput
-                      value={editedCurrentGoals}
-                      onChangeText={setEditedCurrentGoals}
-                      style={[styles.input, styles.multilineInput, { fontFamily: 'Poppins-Medium' }]}
-                      placeholder="What are you working on now?"
-                      placeholderTextColor="#C5BFD3"
-                      multiline
-                      numberOfLines={3}
-                    />
-                  ) : (
-                    <Text 
-                      className="text-neutral-dark text-base leading-6"
-                      style={{ fontFamily: 'Poppins-Regular' }}
-                    >
-                      {user?.goals?.current_goals || 'No current goals set'}
-                    </Text>
-                  )}
-                </View>
-              </BlurView>
-
-              {/* Yearly Goals */}
-              <BlurView intensity={30} tint="light" style={[styles.infoCard, { marginBottom: 16 }]}>
-                <View className="p-5">
-                  <View className="flex-row items-center mb-2">
-                    <View className="w-8 h-8 rounded-full bg-pastel-lavender-100 items-center justify-center mr-3">
-                      <Svg width="16" height="16" viewBox="0 0 24 24">
-                        <Path d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z" fill="#B483F0"/>
-                      </Svg>
-                    </View>
-                    <Text 
-                      className="text-neutral-mid text-xs uppercase tracking-wide"
-                      style={{ fontFamily: 'Poppins-SemiBold' }}
-                    >
-                      Yearly Goals
-                    </Text>
-                  </View>
-                  {isEditing ? (
-                    <TextInput
-                      value={editedYearlyGoals}
-                      onChangeText={setEditedYearlyGoals}
-                      style={[styles.input, styles.multilineInput, { fontFamily: 'Poppins-Medium' }]}
-                      placeholder="What do you want to achieve this year?"
-                      placeholderTextColor="#C5BFD3"
-                      multiline
-                      numberOfLines={3}
-                    />
-                  ) : (
-                    <Text 
-                      className="text-neutral-dark text-base leading-6"
-                      style={{ fontFamily: 'Poppins-Regular' }}
-                    >
-                      {user?.goals?.yearly_goals || 'No yearly goals set'}
-                    </Text>
-                  )}
-                </View>
-              </BlurView>
-
-              {/* Ten Year Vision */}
-              <BlurView intensity={30} tint="light" style={[styles.infoCard, { marginBottom: 16 }]}>
-                <View className="p-5">
-                  <View className="flex-row items-center mb-2">
-                    <View className="w-8 h-8 rounded-full bg-pastel-peach-100 items-center justify-center mr-3">
-                      <Svg width="16" height="16" viewBox="0 0 24 24">
-                        <Path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z" fill="#FF7849"/>
-                      </Svg>
-                    </View>
-                    <Text 
-                      className="text-neutral-mid text-xs uppercase tracking-wide"
-                      style={{ fontFamily: 'Poppins-SemiBold' }}
-                    >
-                      10-Year Vision
-                    </Text>
-                  </View>
-                  {isEditing ? (
-                    <TextInput
-                      value={editedTenYearVision}
-                      onChangeText={setEditedTenYearVision}
-                      style={[styles.input, styles.multilineInput, { fontFamily: 'Poppins-Medium' }]}
-                      placeholder="Where do you see yourself in 10 years?"
-                      placeholderTextColor="#C5BFD3"
-                      multiline
-                      numberOfLines={3}
-                    />
-                  ) : (
-                    <Text 
-                      className="text-neutral-dark text-base leading-6"
-                      style={{ fontFamily: 'Poppins-Regular' }}
-                    >
-                      {user?.goals?.ten_year_vision || 'No long-term vision set'}
-                    </Text>
-                  )}
-                </View>
-              </BlurView>
-
-            </View>
-
-            {/* Account Section */}
-            <View className="mb-6">
-              <Text 
-                className="text-neutral-dark text-lg mb-4"
-                style={{ fontFamily: 'Poppins-SemiBold' }}
-              >
-                Account Settings
-              </Text>
+              <Text style={styles.userEmail}>{user?.email}</Text>
               
-              {/* Member Since */}
-              <BlurView intensity={30} tint="light" style={[styles.infoCard, { marginBottom: 12 }]}>
-                <View className="p-4 flex-row justify-between items-center">
-                  <View className="flex-row items-center">
-                    <View className="w-10 h-10 rounded-xl bg-pastel-lavender-100 items-center justify-center mr-3">
-                      <Svg width="20" height="20" viewBox="0 0 24 24">
-                        <Path
-                          d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11zM7 10h5v5H7z"
-                          fill="#B483F0"
-                        />
-                      </Svg>
-                    </View>
-                    <View>
-                      <Text 
-                        className="text-neutral-dark text-sm"
-                        style={{ fontFamily: 'Poppins-SemiBold' }}
-                      >
-                        Member Since
-                      </Text>
-                      <Text 
-                        className="text-neutral-mid text-xs"
-                        style={{ fontFamily: 'Poppins-Regular' }}
-                      >
-                        {user?.created_at ? formatUTCToLocal(user.created_at, { 
-                          month: 'long', 
-                          year: 'numeric' 
-                        }) : 'Unknown'}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              </BlurView>
+              <Text style={styles.memberSince}>
+                {formatMemberSince(user?.created_at || '')}
+              </Text>
+            </AnimatedCard>
+          </Animated.View>
 
-              {/* Logout Button */}
+          {/* Goals Section */}
+          <Animated.View
+            style={{
+              opacity: fadeAnim,
+              transform: [{ scale: scaleAnim }]
+            }}
+          >
+            <Text style={styles.sectionTitle}>Goals</Text>
+            
+            <AnimatedCard variant="elevated" style={styles.goalCard}>
+              <View style={styles.goalHeader}>
+                <View style={styles.goalIcon}>
+                  <Text>🎯</Text>
+                </View>
+                <Text style={styles.goalTitle}>Current Goals (3-6 months)</Text>
+              </View>
+              {isEditing ? (
+                <TextInput
+                  style={[styles.goalInput]}
+                  value={editedCurrentGoals}
+                  onChangeText={setEditedCurrentGoals}
+                  placeholder="What are you working on?"
+                  placeholderTextColor={theme.colors.text.light}
+                  multiline
+                  scrollEnabled={false}
+                />
+              ) : (
+                <Text style={styles.goalText}>
+                  {user?.goals?.current_goals || 'No goals set yet'}
+                </Text>
+              )}
+            </AnimatedCard>
+
+            <AnimatedCard variant="elevated" style={styles.goalCard}>
+              <View style={styles.goalHeader}>
+                <View style={styles.goalIcon}>
+                  <Text>📅</Text>
+                </View>
+                <Text style={styles.goalTitle}>Yearly Goals</Text>
+              </View>
+              {isEditing ? (
+                <TextInput
+                  style={[styles.goalInput]}
+                  value={editedYearlyGoals}
+                  onChangeText={setEditedYearlyGoals}
+                  placeholder="What do you want to achieve this year?"
+                  placeholderTextColor={theme.colors.text.light}
+                  multiline
+                  scrollEnabled={false}
+                />
+              ) : (
+                <Text style={styles.goalText}>
+                  {user?.goals?.yearly_goals || 'No goals set yet'}
+                </Text>
+              )}
+            </AnimatedCard>
+
+            <AnimatedCard variant="elevated" style={styles.goalCard}>
+              <View style={styles.goalHeader}>
+                <View style={styles.goalIcon}>
+                  <Text>🚀</Text>
+                </View>
+                <Text style={styles.goalTitle}>10-Year Vision</Text>
+              </View>
+              {isEditing ? (
+                <TextInput
+                  style={[styles.goalInput]}
+                  value={editedTenYearVision}
+                  onChangeText={setEditedTenYearVision}
+                  placeholder="Where do you see yourself?"
+                  placeholderTextColor={theme.colors.text.light}
+                  multiline
+                  scrollEnabled={false}
+                />
+              ) : (
+                <Text style={styles.goalText}>
+                  {user?.goals?.ten_year_vision || 'No vision set yet'}
+                </Text>
+              )}
+            </AnimatedCard>
+          </Animated.View>
+
+          {/* Action Buttons */}
+          <Animated.View
+            style={[
+              styles.buttonContainer,
+              { opacity: fadeAnim }
+            ]}
+          >
+            {isEditing ? (
+              <View style={styles.editButtons}>
+                <AnimatedButton
+                  title="Cancel"
+                  variant="ghost"
+                  onPress={() => {
+                    setIsEditing(false);
+                    // Reset values
+                    setEditedName(user?.name || '');
+                    setEditedCurrentGoals(user?.goals?.current_goals || '');
+                    setEditedYearlyGoals(user?.goals?.yearly_goals || '');
+                    setEditedTenYearVision(user?.goals?.ten_year_vision || '');
+                  }}
+                  style={styles.button}
+                />
+                <AnimatedButton
+                  title="Save Changes"
+                  variant="primary"
+                  onPress={handleSave}
+                  loading={loading}
+                  style={styles.button}
+                />
+              </View>
+            ) : (
               <TouchableOpacity
                 onPress={handleLogout}
-                activeOpacity={0.8}
+                style={styles.logoutButton}
               >
                 <LinearGradient
-                  colors={['#FFE3EC', '#FFCBDB']}
-                  style={styles.logoutButton}
+                  colors={[theme.colors.error, '#D68080']}
+                  style={styles.logoutGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                 >
-                  <View className="flex-row items-center justify-center">
-                    <Svg width="20" height="20" viewBox="0 0 24 24" style={{ marginRight: 8 }}>
-                      <Path
-                        d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"
-                        fill="#FF5A70"
-                      />
-                    </Svg>
-                    <Text 
-                      className="text-pastel-rose-700 text-base"
-                      style={{ fontFamily: 'Poppins-Bold' }}
-                    >
-                      Logout
-                    </Text>
-                  </View>
+                  <Text style={styles.logoutText}>Logout</Text>
                 </LinearGradient>
               </TouchableOpacity>
-            </View>
-          </View>
+            )}
+          </Animated.View>
         </ScrollView>
-        )}
-      </SafeAreaView>
-    </LinearGradient>
+      </LinearGradient>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  gradient: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: theme.spacing.xxl,
+  },
+  header: {
+    paddingHorizontal: theme.spacing.lg,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: theme.typography.fontSize.xxxl,
+    fontFamily: theme.typography.fontFamily.bold,
+    color: theme.colors.text.primary,
+  },
   editButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: theme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
+    ...elevation(2),
   },
-  cancelButton: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: '#E5E3EB',
-  },
-  saveButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
-    minWidth: 70,
+  userCard: {
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.lg,
+    padding: theme.spacing.lg,
     alignItems: 'center',
   },
-  levelCard: {
-    padding: 24,
-    borderRadius: 20,
-    shadowColor: '#13BC71',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 15,
-    elevation: 10,
+  userAvatar: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: theme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing.md,
   },
-  infoCard: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.5)',
+  avatarText: {
+    fontSize: theme.typography.fontSize.xxl,
+    fontFamily: theme.typography.fontFamily.bold,
+    color: theme.colors.text.inverse,
+  },
+  userName: {
+    fontSize: theme.typography.fontSize.xl,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.xs,
+  },
+  nameInput: {
+    fontSize: theme.typography.fontSize.xl,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.accent,
+    paddingVertical: theme.spacing.xs,
+    marginBottom: theme.spacing.xs,
+    textAlign: 'center',
+    minWidth: 200,
+  },
+  userEmail: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing.lg,
+  },
+  memberSince: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    marginTop: theme.spacing.sm,
+  },
+  sectionTitle: {
+    fontSize: theme.typography.fontSize.xl,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
+  },
+  goalCard: {
+    marginHorizontal: theme.spacing.lg,
+    marginBottom: theme.spacing.md,
+    padding: theme.spacing.lg,
+  },
+  goalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  goalIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: theme.borderRadius.md,
+    backgroundColor: theme.colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing.sm,
+  },
+  goalTitle: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    flex: 1,
+  },
+  goalText: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    lineHeight: 20,
+  },
+  goalInput: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.primary,
     borderWidth: 1,
-    borderColor: 'rgba(229,227,235,0.3)',
-  },
-  input: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#1F1B2E',
-    borderWidth: 1,
-    borderColor: '#E5E3EB',
-  },
-  multilineInput: {
+    borderColor: theme.colors.accent,
+    borderRadius: theme.borderRadius.md,
+    padding: theme.spacing.sm,
     minHeight: 80,
     textAlignVertical: 'top',
   },
-  priorityChip: {
+  buttonContainer: {
+    marginHorizontal: theme.spacing.lg,
+    marginTop: theme.spacing.lg,
+  },
+  editButtons: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    borderWidth: 1.5,
-    borderColor: '#E5E3EB',
+    gap: theme.spacing.md,
+  },
+  button: {
+    flex: 1,
   },
   logoutButton: {
-    paddingVertical: 16,
-    borderRadius: 20,
+    borderRadius: theme.borderRadius.lg,
+    overflow: 'hidden',
+    ...elevation(4),
+  },
+  logoutGradient: {
+    paddingVertical: theme.spacing.md,
     alignItems: 'center',
+  },
+  logoutText: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.inverse,
   },
 });
 

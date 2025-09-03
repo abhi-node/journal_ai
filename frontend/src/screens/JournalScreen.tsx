@@ -12,12 +12,14 @@ import {
   Animated,
   Dimensions,
   Pressable,
+  Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import Svg, { Path } from 'react-native-svg';
-import { notesAPI, reviewsAPI } from '../services/api';
+import { notesAPI, reviewsAPI, usersAPI } from '../services/api';
 import { formatRelativeDate, formatUTCToLocalTime } from '../utils/timezone';
 import { theme, elevation } from '../theme';
 import { AnimatedCard } from '../components/ui';
@@ -33,7 +35,10 @@ const JournalScreen = () => {
   const [reviews, setReviews] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [isGeneratingReview, setIsGeneratingReview] = useState(false);
+  const [scheduleData, setScheduleData] = useState<any>(null);
+  const [selectedTime, setSelectedTime] = useState(new Date());
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [isUpdatingSchedule, setIsUpdatingSchedule] = useState(false);
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -70,6 +75,9 @@ const JournalScreen = () => {
 
   useEffect(() => {
     loadData();
+    if (activeTab === 'reviews') {
+      loadSchedule();
+    }
   }, [activeTab]);
 
   const loadData = async () => {
@@ -133,34 +141,61 @@ const JournalScreen = () => {
     setRefreshing(false);
   };
 
-  const handleGenerateReview = async () => {
-    setIsGeneratingReview(true);
+  const loadSchedule = async () => {
     try {
-      const result = await reviewsAPI.generateDailyReview();
+      const data = await usersAPI.getReviewSchedule();
+      setScheduleData(data);
+      
+      if (data.time_utc) {
+        // Convert UTC time to local time for display
+        const [hours, minutes] = data.time_utc.split(':').map(Number);
+        const localTime = new Date();
+        localTime.setHours(hours, minutes, 0, 0);
+        setSelectedTime(localTime);
+      }
+    } catch (error) {
+      console.error('Error loading schedule:', error);
+    }
+  };
+
+  const handleUpdateSchedule = async () => {
+    setIsUpdatingSchedule(true);
+    try {
+      const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const timeString = `${selectedTime.getHours().toString().padStart(2, '0')}:${selectedTime.getMinutes().toString().padStart(2, '0')}`;
+      
+      await usersAPI.updateReviewSchedule({
+        time: timeString,
+        timezone: timezone
+      });
+      
+      await loadSchedule();
       
       Alert.alert(
-        'Review Generation Started',
-        'Your daily review is being generated and will appear shortly.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              setTimeout(() => {
-                loadReviews();
-              }, 5000);
-            }
-          }
-        ]
+        'Schedule Updated',
+        `Your daily review is now scheduled for ${formatTime(selectedTime)}`,
+        [{ text: 'OK' }]
       );
     } catch (error: any) {
       Alert.alert(
         'Error',
-        error.message || 'Failed to generate review',
+        error.message || 'Failed to update schedule',
         [{ text: 'OK' }]
       );
     } finally {
-      setIsGeneratingReview(false);
+      setIsUpdatingSchedule(false);
     }
+  };
+
+  const onTimeChange = (hours: number, minutes: number) => {
+    const newTime = new Date();
+    newTime.setHours(hours, minutes, 0, 0);
+    setSelectedTime(newTime);
+    setShowTimePicker(false);
+  };
+
+  const formatTime = (date: Date) => {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   const switchTab = (tab: TabType) => {
@@ -191,7 +226,7 @@ const JournalScreen = () => {
     return formatRelativeDate(item.date || item.review_date);
   };
 
-  const formatTime = (timestamp: string) => {
+  const formatTimestamp = (timestamp: string) => {
     return formatUTCToLocalTime(timestamp);
   };
 
@@ -212,7 +247,7 @@ const JournalScreen = () => {
               {formatRelativeDate(item.date || item.created_at)}
             </Text>
             <Text style={styles.noteTime}>
-              {formatTime(item.created_at)}
+              {formatTimestamp(item.created_at)}
             </Text>
             {item.content && item.content !== '' && (
               <Text style={styles.notePreview} numberOfLines={2}>
@@ -420,32 +455,107 @@ const JournalScreen = () => {
           )}
         </Animated.View>
 
-        {/* Generate Review Button */}
+        {/* Review Schedule Section */}
         {activeTab === 'reviews' && !loading && (
           <Animated.View 
             style={[
-              styles.generateButton,
+              styles.scheduleContainer,
               { opacity: fadeAnim }
             ]}
           >
-            <TouchableOpacity
-              onPress={handleGenerateReview}
-              disabled={isGeneratingReview}
-              style={styles.generateButtonInner}
-            >
-              <LinearGradient
-                colors={theme.colors.gradients.primary}
-                style={styles.generateGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+            <AnimatedCard variant="elevated" style={styles.scheduleCard}>
+              <Text style={styles.scheduleTitle}>Daily Review Schedule</Text>
+              
+              {scheduleData?.scheduled && (
+                <Text style={styles.currentSchedule}>
+                  Currently scheduled for {formatTime(selectedTime)}
+                </Text>
+              )}
+              
+              <TouchableOpacity 
+                onPress={() => setShowTimePicker(true)}
+                style={styles.timeSelector}
               >
-                {isGeneratingReview ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <Text style={styles.generateText}>Generate Daily Review</Text>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
+                <Text style={styles.timeSelectorText}>
+                  {formatTime(selectedTime)}
+                </Text>
+                <Text style={styles.timeSelectorIcon}>⏰</Text>
+              </TouchableOpacity>
+              
+              {/* Time Picker Modal */}
+              <Modal
+                visible={showTimePicker}
+                transparent={true}
+                animationType="slide"
+                onRequestClose={() => setShowTimePicker(false)}
+              >
+                <View style={styles.modalOverlay}>
+                  <View style={styles.timePickerModal}>
+                    <Text style={styles.modalTitle}>Select Time</Text>
+                    
+                    <View style={styles.timePickerContainer}>
+                      <ScrollView 
+                        style={styles.timePickerScroll}
+                        showsVerticalScrollIndicator={false}
+                      >
+                        {Array.from({ length: 24 }, (_, i) => i).map(hour => {
+                          const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                          const period = hour < 12 ? 'AM' : 'PM';
+                          
+                          return Array.from({ length: 4 }, (_, j) => j * 15).map(minute => (
+                            <TouchableOpacity
+                              key={`${hour}-${minute}`}
+                              style={[
+                                styles.timeOption,
+                                selectedTime.getHours() === hour && 
+                                selectedTime.getMinutes() === minute && 
+                                styles.selectedTimeOption
+                              ]}
+                              onPress={() => onTimeChange(hour, minute)}
+                            >
+                              <Text style={[
+                                styles.timeOptionText,
+                                selectedTime.getHours() === hour && 
+                                selectedTime.getMinutes() === minute && 
+                                styles.selectedTimeText
+                              ]}>
+                                {`${displayHour}:${minute.toString().padStart(2, '0')} ${period}`}
+                              </Text>
+                            </TouchableOpacity>
+                          ));
+                        })}
+                      </ScrollView>
+                    </View>
+                    
+                    <TouchableOpacity
+                      style={styles.modalCloseButton}
+                      onPress={() => setShowTimePicker(false)}
+                    >
+                      <Text style={styles.modalCloseText}>Cancel</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </Modal>
+              
+              <TouchableOpacity
+                onPress={handleUpdateSchedule}
+                disabled={isUpdatingSchedule}
+                style={styles.updateButton}
+              >
+                <LinearGradient
+                  colors={theme.colors.gradients.primary}
+                  style={styles.updateGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                >
+                  {isUpdatingSchedule ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <Text style={styles.updateText}>Update Schedule</Text>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            </AnimatedCard>
           </Animated.View>
         )}
       </LinearGradient>
@@ -631,25 +741,117 @@ const styles = StyleSheet.create({
     color: theme.colors.text.secondary,
     textAlign: 'center',
   },
-  generateButton: {
+  scheduleContainer: {
     position: 'absolute',
     bottom: theme.spacing.xxl + 80,
     left: theme.spacing.lg,
     right: theme.spacing.lg,
   },
-  generateButtonInner: {
+  scheduleCard: {
+    padding: theme.spacing.lg,
+    alignItems: 'center',
+  },
+  scheduleTitle: {
+    fontSize: theme.typography.fontSize.lg,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    marginBottom: theme.spacing.md,
+  },
+  currentSchedule: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    marginBottom: theme.spacing.md,
+  },
+  timeSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    paddingVertical: theme.spacing.md,
+    paddingHorizontal: theme.spacing.lg,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing.lg,
+    ...elevation(2),
+  },
+  timeSelectorText: {
+    fontSize: theme.typography.fontSize.xl,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.text.primary,
+    marginRight: theme.spacing.sm,
+  },
+  timeSelectorIcon: {
+    fontSize: 24,
+  },
+  updateButton: {
+    width: '100%',
     borderRadius: theme.borderRadius.lg,
     overflow: 'hidden',
-    ...elevation(4),
+    ...elevation(3),
   },
-  generateGradient: {
+  updateGradient: {
     paddingVertical: theme.spacing.md,
     alignItems: 'center',
   },
-  generateText: {
+  updateText: {
     fontSize: theme.typography.fontSize.md,
     fontFamily: theme.typography.fontFamily.semibold,
     color: theme.colors.text.inverse,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  timePickerModal: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.xl,
+    padding: theme.spacing.lg,
+    width: width - theme.spacing.lg * 2,
+    maxHeight: 500,
+    ...elevation(5),
+  },
+  modalTitle: {
+    fontSize: theme.typography.fontSize.lg,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+    textAlign: 'center',
+    marginBottom: theme.spacing.md,
+  },
+  timePickerContainer: {
+    maxHeight: 350,
+  },
+  timePickerScroll: {
+    maxHeight: 350,
+  },
+  timeOption: {
+    paddingVertical: theme.spacing.sm,
+    paddingHorizontal: theme.spacing.md,
+    borderRadius: theme.borderRadius.md,
+    marginBottom: theme.spacing.xs,
+  },
+  selectedTimeOption: {
+    backgroundColor: theme.colors.primary,
+  },
+  timeOptionText: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.primary,
+    textAlign: 'center',
+  },
+  selectedTimeText: {
+    color: theme.colors.text.inverse,
+    fontFamily: theme.typography.fontFamily.semibold,
+  },
+  modalCloseButton: {
+    marginTop: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
+    alignItems: 'center',
+  },
+  modalCloseText: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.text.secondary,
   },
 });
 

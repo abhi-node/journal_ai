@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, JSON
+from sqlalchemy import Column, String, DateTime, JSON, Time
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -22,6 +22,10 @@ class User(Base):
         "streak_days": 0,
         "total_entries": 0
     })
+    
+    # Daily review scheduling fields
+    daily_review_task_id = Column(String, nullable=True)  # Current scheduled Celery task ID
+    daily_review_time = Column(Time, nullable=True)  # UTC time for daily review
     
     notes = relationship("Note", back_populates="user", cascade="all, delete-orphan")
     reviews = relationship("Review", back_populates="user", cascade="all, delete-orphan")

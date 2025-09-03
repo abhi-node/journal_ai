@@ -49,7 +49,7 @@ export const login = createAsyncThunk(
 
 export const signup = createAsyncThunk(
   'auth/signup',
-  async (userData: { email: string; password: string; name: string }) => {
+  async (userData: { email: string; password: string; name: string; timezone: string }) => {
     const user = await authService.signup(userData);
     // After signup, automatically log them in
     const loginResponse = await authService.login({

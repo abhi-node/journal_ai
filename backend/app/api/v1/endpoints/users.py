@@ -1,13 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
+from datetime import time
 from app.db.session import get_db
 from app.schemas.user import User, UserGoals, UserUpdate
 from app.models.user import User as UserModel
 from app.api.v1.endpoints.auth import get_current_user
 from app.tasks.skill_tasks import generate_initial_skills_task, generate_additional_skills_task
+from app.services.review_scheduler import ReviewScheduler
 from pydantic import BaseModel
 import logging
 
@@ -20,6 +22,11 @@ class GoalsUpdate(BaseModel):
     current_goals: str
     yearly_goals: str
     ten_year_vision: str
+
+
+class UpdateReviewScheduleRequest(BaseModel):
+    time: str  # HH:MM format
+    timezone: str  # e.g., "America/New_York"
 
 
 @router.put("/create_goals", response_model=User)
@@ -139,3 +146,94 @@ def update_user_profile(
         logger.info(f"Goals unchanged for user {current_user.id}, skipping skill generation")
     
     return current_user
+
+
+@router.get("/review-schedule")
+def get_review_schedule(
+    current_user: UserModel = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get user's current review schedule settings.
+    """
+    return {
+        "scheduled": current_user.daily_review_task_id is not None,
+        "time_utc": current_user.daily_review_time.isoformat() if current_user.daily_review_time else None,
+        "task_id": current_user.daily_review_task_id
+    }
+
+
+@router.put("/review-schedule")
+def update_review_schedule(
+    request: UpdateReviewScheduleRequest,
+    current_user: UserModel = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update or create review schedule for the current user.
+    The time should be in HH:MM format and will be scheduled in the user's timezone.
+    """
+    try:
+        # Parse time from HH:MM format
+        time_parts = request.time.split(':')
+        if len(time_parts) != 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid time format. Use HH:MM"
+            )
+        
+        hour = int(time_parts[0])
+        minute = int(time_parts[1])
+        
+        if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid time. Hour must be 0-23, minute must be 0-59"
+            )
+        
+        review_time = time(hour=hour, minute=minute)
+        
+        # Schedule or reschedule the review
+        task_id, next_review_utc = ReviewScheduler.schedule_or_reschedule_review(
+            db=db,
+            user_id=current_user.id,
+            review_time=review_time,
+            user_timezone=request.timezone
+        )
+        
+        logger.info(f"Updated review schedule for user {current_user.id}: task {task_id} at {next_review_utc}")
+        
+        return {
+            "success": True,
+            "task_id": task_id,
+            "next_review_utc": next_review_utc.isoformat(),
+            "time_utc": review_time.isoformat()
+        }
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid time format: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Error updating review schedule: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update review schedule"
+        )
+
+
+@router.delete("/review-schedule")
+def disable_review_schedule(
+    current_user: UserModel = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Disable scheduled reviews for the current user.
+    """
+    success = ReviewScheduler.cancel_scheduled_review(db, current_user.id)
+    
+    if success:
+        return {"success": True, "message": "Review schedule disabled"}
+    else:
+        return {"success": False, "message": "No scheduled review to disable"}

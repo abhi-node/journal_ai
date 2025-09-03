@@ -192,4 +192,15 @@ export const reviewsAPI = {
   }
 };
 
+// Users API
+export const usersAPI = {
+  getCurrentUser: () => apiService.get('/users/me'),
+  updateProfile: (data: any) => apiService.put('/users/me', data),
+  createGoals: (goals: any) => apiService.put('/users/create_goals', goals),
+  getReviewSchedule: () => apiService.get('/users/review-schedule'),
+  updateReviewSchedule: (data: { time: string; timezone: string }) => 
+    apiService.put('/users/review-schedule', data),
+  disableReviewSchedule: () => apiService.delete('/users/review-schedule')
+};
+
 export default apiService;

@@ -39,6 +39,7 @@ class UserBase(BaseModel):
 # User Create Schema (for registration)
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
+    timezone: str = Field(..., description="User's timezone (e.g., 'America/New_York')")
     
     @validator('password')
     def validate_password(cls, v):

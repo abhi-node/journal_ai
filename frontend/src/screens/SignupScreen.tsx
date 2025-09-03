@@ -150,7 +150,15 @@ const SignupScreen = () => {
       }),
     ]).start();
 
-    dispatch(signup({ email: email.trim(), password, name: name.trim() }));
+    // Get user's timezone
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    
+    dispatch(signup({ 
+      email: email.trim(), 
+      password, 
+      name: name.trim(),
+      timezone: timezone || 'UTC'
+    }));
   };
 
   const displayError = error || validationError;

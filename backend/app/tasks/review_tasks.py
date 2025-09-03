@@ -92,6 +92,7 @@ def generate_daily_review(
                 "message": "OpenAI service is not available"
             }
         
+        # Check if review already exists for this date
         existing_review = self.db.query(Review).filter(
             and_(
                 Review.user_id == user_uuid,
@@ -102,12 +103,38 @@ def generate_daily_review(
         
         if existing_review:
             logger.info(f"Daily review already exists for user {user_id} on {review_date}")
+            
+            # Schedule next review but skip this one
+            if user.daily_review_time:
+                from app.services.review_scheduler import ReviewScheduler
+                from datetime import timedelta
+                
+                # Schedule for same time tomorrow (24 hours from now)
+                tomorrow_same_time = datetime.now(timezone.utc) + timedelta(days=1)
+                
+                try:
+                    task = generate_daily_review.apply_async(
+                        args=[user_id],
+                        kwargs={'user_timezone': user_timezone},
+                        eta=tomorrow_same_time
+                    )
+                    
+                    # Update task ID in user record
+                    user.daily_review_task_id = task.id
+                    self.db.commit()
+                    
+                    logger.info(f"Review already exists, scheduled next review for {user_id} at {tomorrow_same_time}")
+                    
+                except Exception as scheduling_error:
+                    logger.error(f"Failed to schedule next review after finding existing: {str(scheduling_error)}")
+            
             return {
                 "status": "exists",
                 "message": "Daily review already exists for this date",
                 "review_id": str(existing_review.id)
             }
         
+        # Check if notes exist for the day
         notes = self.db.query(Note).filter(
             and_(
                 Note.user_id == user_uuid,
@@ -117,9 +144,34 @@ def generate_daily_review(
         
         if not notes:
             logger.warning(f"No notes found for user {user_id} on {review_date}")
+            
+            # No notes exist, schedule for next day instead
+            if user.daily_review_time:
+                from app.services.review_scheduler import ReviewScheduler
+                from datetime import timedelta
+                
+                # Schedule for same time tomorrow (24 hours from now)
+                tomorrow_same_time = datetime.now(timezone.utc) + timedelta(days=1)
+                
+                try:
+                    task = generate_daily_review.apply_async(
+                        args=[user_id],
+                        kwargs={'user_timezone': user_timezone},
+                        eta=tomorrow_same_time
+                    )
+                    
+                    # Update task ID in user record
+                    user.daily_review_task_id = task.id
+                    self.db.commit()
+                    
+                    logger.info(f"No notes found, rescheduled review for user {user_id} to {tomorrow_same_time}")
+                    
+                except Exception as scheduling_error:
+                    logger.error(f"Failed to reschedule review after no notes: {str(scheduling_error)}")
+            
             return {
-                "status": "error",
-                "message": "No notes found for this date"
+                "status": "no_notes",
+                "message": "No notes found for this date, rescheduled for tomorrow"
             }
         
         # Extract content from JSON structure
@@ -322,6 +374,30 @@ Only award XP to skills that were clearly practiced based on the journal entries
             logger.info(f"Successfully generated daily review for user {user_id}")
             logger.info(f"Review score: {review_content['score']}")
             logger.info(f"XP awarded: {json.dumps(xp_earned)}")
+            
+            # Schedule next review (24 hours later) if user has scheduling enabled
+            if user.daily_review_time:
+                from app.services.review_scheduler import ReviewScheduler
+                from datetime import timedelta
+                
+                # Schedule for same time tomorrow (24 hours from now)
+                tomorrow_same_time = datetime.now(timezone.utc) + timedelta(days=1)
+                
+                try:
+                    task = generate_daily_review.apply_async(
+                        args=[user_id],
+                        kwargs={'user_timezone': user_timezone},
+                        eta=tomorrow_same_time
+                    )
+                    
+                    # Update task ID in user record
+                    user.daily_review_task_id = task.id
+                    self.db.commit()
+                    
+                    logger.info(f"Scheduled next review for user {user_id} at {tomorrow_same_time} (task: {task.id})")
+                    
+                except Exception as scheduling_error:
+                    logger.error(f"Failed to schedule next review for user {user_id}: {str(scheduling_error)}")
             
             # Include daily_stats if present in new format
             daily_stats = review_content.get("daily_stats", {

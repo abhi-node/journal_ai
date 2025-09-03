@@ -68,7 +68,7 @@ def signup(
     db: Session = Depends(get_db)
 ):
     """
-    Create new user account.
+    Create new user account and schedule default daily review at 9 PM.
     """
     db_user = crud_user.get_user_by_email(db, email=user.email)
     if db_user:
@@ -76,7 +76,27 @@ def signup(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
+    
+    # Create the user
     created_user = crud_user.create_user(db=db, user=user)
+    
+    # Schedule default 9 PM daily review in user's timezone
+    from datetime import time
+    from app.services.review_scheduler import ReviewScheduler
+    
+    try:
+        default_review_time = time(hour=21, minute=0)  # 9 PM
+        task_id, next_review_utc = ReviewScheduler.schedule_or_reschedule_review(
+            db=db,
+            user_id=created_user.id,
+            review_time=default_review_time,
+            user_timezone=user.timezone
+        )
+        print(f"Scheduled initial daily review for new user {created_user.id} at {next_review_utc}")
+    except Exception as e:
+        # Log the error but don't fail the signup
+        print(f"Failed to schedule initial review for user {created_user.id}: {str(e)}")
+    
     return created_user
 
 

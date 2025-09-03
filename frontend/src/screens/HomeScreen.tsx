@@ -14,7 +14,6 @@ import { RootState } from '../store';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
-import AudioWaveform from '../components/AudioWaveform';
 import { useAudioRecording } from '../hooks/useAudioRecording';
 import { theme, elevation } from '../theme';
 import { AnimatedCard, FloatingElement } from '../components/ui';
@@ -297,39 +296,7 @@ const HomeScreen = () => {
           
           {/* Main Recording Section */}
           <View style={styles.mainSection}>
-            {/* Recording Indicator */}
-            {isHolding && (
-              <Animated.View
-                style={[
-                  styles.recordingIndicator,
-                  {
-                    opacity: recordingIndicatorAnim,
-                    transform: [
-                      {
-                        translateY: recordingIndicatorAnim.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [-10, 0],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                <AnimatedCard variant="elevated" style={styles.recordingCard}>
-                  <View style={styles.recordingDot} />
-                  <Text style={styles.recordingText}>
-                    Recording {formatDuration(recordingDuration)}
-                  </Text>
-                </AnimatedCard>
-              </Animated.View>
-            )}
             
-            {/* Waveform */}
-            {isRecording && (
-              <View style={styles.waveformContainer}>
-                <AudioWaveform isRecording={isRecording} />
-              </View>
-            )}
             
             {/* Instruction */}
             <Animated.View 
@@ -396,7 +363,7 @@ const HomeScreen = () => {
                       <View style={styles.buttonRing1} />
                       <View style={styles.buttonRing2} />
                     </View>
-                    <Svg width="56" height="56" viewBox="0 0 24 24">
+                    <Svg width="70" height="70" viewBox="0 0 24 24">
                       {isHolding ? (
                         <Rect
                           x="7"
@@ -513,64 +480,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: theme.spacing.lg,
-  },
-  recordingIndicator: {
-    position: 'absolute',
-    bottom: 100,
-    alignSelf: 'center',
-    zIndex: 10,
-  },
-  recordingCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.md,
-    backgroundColor: theme.colors.surface,
-  },
-  recordingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: theme.colors.error,
-    marginRight: theme.spacing.sm,
-  },
-  recordingText: {
-    fontSize: theme.typography.fontSize.sm,
-    fontFamily: theme.typography.fontFamily.medium,
-    color: theme.colors.text.primary,
-  },
-  waveformContainer: {
-    position: 'absolute',
-    top: -80,
-    width: width - 48,
-    height: 40,
-    opacity: 0.5,
+    paddingBottom: 100, // Add padding to move content up
   },
   instructionContainer: {
-    marginBottom: theme.spacing.xxl,
+    marginBottom: theme.spacing.xxl * 1.5,
   },
   instruction: {
-    fontSize: theme.typography.fontSize.md,
-    fontFamily: theme.typography.fontFamily.regular,
+    fontSize: theme.typography.fontSize.lg,
+    fontFamily: theme.typography.fontFamily.medium,
     color: theme.colors.text.secondary,
     textAlign: 'center',
   },
   buttonContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: theme.spacing.lg,
+    marginBottom: theme.spacing.xl,
   },
   ripple: {
     position: 'absolute',
-    width: 140,
-    height: 140,
-    borderRadius: 70,
+    width: 170,
+    height: 170,
+    borderRadius: 85,
     backgroundColor: theme.colors.primary,
   },
   recordButton: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
     alignItems: 'center',
     justifyContent: 'center',
     ...elevation(8),
@@ -581,29 +517,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   buttonRing1: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 125,
+    height: 125,
+    borderRadius: 62.5,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     position: 'absolute',
   },
   buttonRing2: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     position: 'absolute',
   },
   buttonLabel: {
-    fontSize: theme.typography.fontSize.sm,
-    fontFamily: theme.typography.fontFamily.regular,
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.medium,
     textAlign: 'center',
     marginTop: theme.spacing.md,
     height: 20,
   },
   statusMessage: {
     position: 'absolute',
-    bottom: 100,
+    top: 60,
     alignSelf: 'center',
   },
   statusCard: {
@@ -612,7 +548,7 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.surface,
   },
   statusText: {
-    fontSize: theme.typography.fontSize.sm,
+    fontSize: theme.typography.fontSize.md,
     fontFamily: theme.typography.fontFamily.medium,
     color: theme.colors.success,
   },

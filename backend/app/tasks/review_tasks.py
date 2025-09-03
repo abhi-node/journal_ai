@@ -143,36 +143,77 @@ def generate_daily_review(
         
         leveling_chart = XPLevelingSystem.get_leveling_chart(1, 20)
         
-        system_prompt = """You are an AI life coach analyzing a user's daily journal entries to generate a comprehensive daily review.
+        system_prompt = """You are an AI life coach analyzing a user's daily journal entries and goals to generate a visually engaging daily review.
 
 You must generate a review in the following JSON format:
 {
   "score": <0-100 integer based on goal alignment and productivity>,
-  "day_overview": "<Detailed narrative summary of the day's activities and experiences>",
   "emotional_color": "<one of: energized, happy, content, calm, focused, anxious, stressed, sad, frustrated, tired>",
-  "achievements": ["<specific achievement 1>", "<achievement 2>", ...],
-  "areas_for_improvement": ["<area 1>", "<area 2>", ...],
-  "goal_progress": {
-    "<goal_area>": "<specific progress description>",
-    ...
+  "day_summary": {
+    "headline": "<Brief 5-10 word summary capturing the essence of the day>",
+    "key_moments": [
+      "<Time period>: <Brief description of what happened>",
+      "<Time period>: <Brief description of what happened>",
+      "<Time period>: <Brief description of what happened>"
+    ]
   },
-  "tomorrow_recommendations": ["<actionable recommendation 1>", "<recommendation 2>", ...],
-  "xp_earned": {
-    "<skill_name>": <xp_amount>,
-    ...
+  "achievements": [
+    "<Specific, concise achievement 1>",
+    "<Specific, concise achievement 2>",
+    "<Specific, concise achievement 3>"
+  ],
+  "skills_practiced": {
+    "<skill_name>": {
+      "xp_gained": <xp_amount>,
+      "activities": "<Brief description of what was done to practice this skill>",
+      "level_progress": {
+        "current": <current_level>,
+        "progress_percent": <0-100 percent to next level>
+      }
+    }
+  },
+  "growth_areas": [
+    "<Area for improvement 1> - <Brief explanation>",
+    "<Area for improvement 2> - <Brief explanation>",
+    "<Area for improvement 3> - <Brief explanation>"
+  ],
+  "tomorrow_focus": {
+    "primary": "<Main focus for tomorrow in 5-10 words>",
+    "quick_wins": [
+      "<Quick actionable task 1>",
+      "<Quick actionable task 2>",
+      "<Quick actionable task 3>"
+    ]
+  },
+  "daily_stats": {
+    "total_xp": <sum of all xp_gained>,
+    "skills_improved": <count of skills practiced>
   }
 }
 
-For XP allocation:
-- Consider time spent, difficulty, and impact of activities
-- Easy tasks: 10-30 XP
-- Medium tasks: 25-50 XP  
-- Hard tasks: 50-100 XP
-- Exceptional achievements: 100-200 XP
-- Daily maximum per skill: 200 XP
-- Be balanced and fair in XP distribution
+CRITICAL RULES:
+1. ONLY include skills in "skills_practiced" that were ACTUALLY practiced today based on journal entries
+2. Do NOT mention skills that weren't worked on - no "0 XP" entries
+3. Keep all text concise - maximum 10-15 words per item
+4. Achievements should be specific and tangible, not vague
+5. Key moments should follow chronological order (Morning/Afternoon/Evening or specific times)
+6. Growth areas should be constructive and based off of user's goals
+7. Tomorrow's focus should be revolved around TODOs left for the day and user's goals
+8. Ensure you always generate 3 achievements, 3 growth areas, and 3 quick wins ALWAYS
 
-Emotional color should reflect the overall tone and energy of the day based on the journal entries."""
+For XP allocation:
+- Easy/routine tasks: 10-30 XP
+- Medium effort tasks: 30-60 XP  
+- Hard/challenging tasks: 60-100 XP
+- Exceptional achievements: 100-150 XP
+- Daily maximum per skill: 200 XP
+- Only award XP for skills that were clearly practiced
+
+Calculate level_progress using this formula:
+- Levels 1-5: 100 XP per level
+- Levels 6-10: 200 XP per level  
+- Levels 11-15: 400 XP per level
+- Levels 16-20: 800 XP per level"""
 
         user_prompt = f"""Generate a daily review based on the following information:
 
@@ -184,21 +225,19 @@ Current Goals: {user_goals.get('current_goals', 'Not specified')}
 Yearly Goals: {user_goals.get('yearly_goals', 'Not specified')}
 10-Year Vision: {user_goals.get('ten_year_vision', 'Not specified')}
 
-USER'S SKILLS AND CURRENT LEVELS:
+USER'S CURRENT SKILL LEVELS:
 {json.dumps(skill_categories, indent=2)}
 
-LEVELING SYSTEM (for reference):
-{json.dumps(leveling_chart[:10], indent=2)}
+Generate a visually-focused daily review that:
+1. Creates a headline and 3 key moments (morning/afternoon/evening or specific times)
+2. Lists 2-3 specific achievements (be concrete, not vague)
+3. ONLY includes skills that were actually practiced (no zero XP entries)
+4. Provides 1-2 constructive growth areas with brief explanations
+5. Sets a clear primary focus for tomorrow with 2 quick wins
+6. Calculates accurate daily statistics
 
-Generate a comprehensive daily review that:
-1. Provides an insightful overview of the day
-2. Identifies specific achievements and areas for improvement
-3. Assesses progress toward stated goals
-4. Provides actionable recommendations for tomorrow
-5. Awards appropriate XP for each skill based on activities mentioned
-6. Assigns an emotional color that best represents the day's tone
-
-Ensure the response is valid JSON matching the specified format."""
+Remember: Keep all text extremely concise (10-15 words max per item).
+Only award XP to skills that were clearly practiced based on the journal entries."""
 
         try:
             response = openai_client.chat.completions.create(
@@ -227,7 +266,18 @@ Ensure the response is valid JSON matching the specified format."""
             )
             self.db.add(new_review)
             
-            xp_earned = review_content.get("xp_earned", {})
+            # Handle both new format (skills_practiced) and old format (xp_earned) for backward compatibility
+            skills_practiced = review_content.get("skills_practiced", {})
+            xp_earned = {}
+            
+            # Extract XP from new format
+            if skills_practiced:
+                for skill_name, skill_data in skills_practiced.items():
+                    xp_earned[skill_name] = skill_data.get("xp_gained", 0)
+            # Fall back to old format if new format not present
+            elif "xp_earned" in review_content:
+                xp_earned = review_content["xp_earned"]
+            
             if xp_earned:
                 updated_stats = user_stats.copy()
                 updated_skills = skill_categories.copy()
@@ -244,6 +294,15 @@ Ensure the response is valid JSON matching the specified format."""
                         updated_skills[skill_name]["level"] = xp_update["level"]
                         
                         total_xp_gained += xp_amount
+                        
+                        # Update level_progress in the review content if using new format
+                        if skills_practiced and skill_name in skills_practiced:
+                            skills_practiced[skill_name]["level_progress"]["current"] = xp_update["level"]
+                            # Calculate progress percent
+                            level_xp = xp_update["xp_in_current_level"]
+                            xp_for_level = xp_update["xp_for_next_level"]
+                            progress_percent = int((level_xp / xp_for_level) * 100) if xp_for_level > 0 else 0
+                            skills_practiced[skill_name]["level_progress"]["progress_percent"] = progress_percent
                         
                         if xp_update["level_up"]:
                             logger.info(f"User {user_id} leveled up {skill_name} to level {xp_update['level']}")
@@ -264,6 +323,12 @@ Ensure the response is valid JSON matching the specified format."""
             logger.info(f"Review score: {review_content['score']}")
             logger.info(f"XP awarded: {json.dumps(xp_earned)}")
             
+            # Include daily_stats if present in new format
+            daily_stats = review_content.get("daily_stats", {
+                "total_xp": total_xp_gained if 'total_xp_gained' in locals() and xp_earned else 0,
+                "skills_improved": len(xp_earned) if xp_earned else 0
+            })
+            
             return {
                 "status": "success",
                 "user_id": user_id,
@@ -271,6 +336,7 @@ Ensure the response is valid JSON matching the specified format."""
                 "date": review_date.isoformat(),
                 "score": review_content["score"],
                 "xp_earned": xp_earned,
+                "daily_stats": daily_stats,
                 "content": review_content
             }
             

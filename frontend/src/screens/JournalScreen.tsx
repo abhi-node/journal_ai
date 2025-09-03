@@ -282,9 +282,8 @@ const JournalScreen = () => {
           variant="elevated"
           animationType="slide"
           delay={index * 50}
-          style={[styles.reviewCard, { borderWidth: 2, borderColor: color }]}
+          style={[styles.reviewCard, { borderWidth: 2, borderColor: color, borderLeftWidth: 4 }]}
         >
-          <View style={[styles.reviewAccent, { backgroundColor: color }]} />
           <View style={styles.reviewContent}>
             <View style={styles.reviewHeader}>
               <View>
@@ -568,16 +567,11 @@ const styles = StyleSheet.create({
     color: theme.colors.text.secondary,
   },
   reviewCard: {
-    flexDirection: 'row',
     overflow: 'hidden',
-    padding: 0,
-  },
-  reviewAccent: {
-    width: 4,
+    padding: theme.spacing.lg,
   },
   reviewContent: {
     flex: 1,
-    padding: theme.spacing.lg,
   },
   reviewHeader: {
     flexDirection: 'row',

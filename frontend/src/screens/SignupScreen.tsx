@@ -11,6 +11,7 @@ import {
   Animated,
   StyleSheet,
   Dimensions,
+  ColorValue,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useDispatch, useSelector } from 'react-redux';
@@ -182,7 +183,7 @@ const SignupScreen = () => {
 
   return (
     <LinearGradient
-      colors={theme.colors.gradients.soft}
+      colors={theme.colors.gradients.soft as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
       style={{ flex: 1 }}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -257,7 +258,7 @@ const SignupScreen = () => {
                   activeOpacity={0.7}
                 >
                   <LinearGradient
-                    colors={theme.colors.gradients.primary}
+                    colors={theme.colors.gradients.primary as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
                     style={styles.backButton}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
@@ -452,7 +453,7 @@ const SignupScreen = () => {
                     className="overflow-hidden rounded-3xl mb-6"
                   >
                     <LinearGradient
-                      colors={loading ? [theme.colors.accent, theme.colors.accent] : theme.colors.gradients.primary}
+                      colors={(loading ? [theme.colors.accent, theme.colors.accent] : theme.colors.gradients.primary) as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
                       style={styles.signupButton}
                       start={{ x: 0, y: 0 }}
                       end={{ x: 1, y: 0 }}

@@ -12,6 +12,7 @@ import {
   RefreshControl,
   Animated,
   Pressable,
+  ColorValue,
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import { logout, updateUser } from '../store/slices/authSlice';
@@ -182,7 +183,7 @@ const ProfileScreen = () => {
     return (
       <SafeAreaView style={styles.container}>
         <LinearGradient
-          colors={theme.colors.gradients.soft}
+          colors={theme.colors.gradients.soft as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
           style={styles.gradient}
         >
           <View style={styles.loadingContainer}>
@@ -196,7 +197,7 @@ const ProfileScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
-        colors={theme.colors.gradients.soft}
+        colors={theme.colors.gradients.soft as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
         style={styles.gradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
@@ -400,7 +401,7 @@ const ProfileScreen = () => {
                 style={styles.logoutButton}
               >
                 <LinearGradient
-                  colors={[theme.colors.error, '#D68080']}
+                  colors={[theme.colors.error, '#D68080'] as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
                   style={styles.logoutGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}

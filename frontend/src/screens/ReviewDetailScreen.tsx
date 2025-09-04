@@ -9,6 +9,7 @@ import {
   StyleSheet,
   Dimensions,
   Pressable,
+  ColorValue,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -248,7 +249,7 @@ const ReviewDetailScreen = () => {
     return (
       <SafeAreaView style={styles.container}>
         <LinearGradient
-          colors={theme.colors.gradients.soft}
+          colors={theme.colors.gradients.soft as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
           style={styles.gradient}
         >
           <View style={styles.loadingContainer}>
@@ -263,7 +264,7 @@ const ReviewDetailScreen = () => {
     return (
       <SafeAreaView style={styles.container}>
         <LinearGradient
-          colors={theme.colors.gradients.soft}
+          colors={theme.colors.gradients.soft as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
           style={styles.gradient}
         >
           <View style={styles.header}>
@@ -310,7 +311,7 @@ const ReviewDetailScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
-        colors={theme.colors.gradients.soft}
+        colors={theme.colors.gradients.soft as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
         style={styles.gradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
@@ -356,7 +357,7 @@ const ReviewDetailScreen = () => {
           >
             <AnimatedCard variant="elevated" style={styles.scoreCard}>
               <LinearGradient
-                colors={emotionInfo.gradient}
+                colors={emotionInfo.gradient as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
                 style={styles.scoreCardGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}

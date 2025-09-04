@@ -8,6 +8,7 @@ import {
   TextStyle,
   PressableProps,
   ActivityIndicator,
+  ColorValue,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '../../theme';
@@ -189,7 +190,7 @@ export const AnimatedButton: React.FC<AnimatedButtonProps> = ({
           </Animated.View>
         ) : (
           <LinearGradient
-            colors={getVariantColors()}
+            colors={getVariantColors() as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
             style={[
               styles.button,
               getSizeStyles(),

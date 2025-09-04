@@ -15,6 +15,7 @@ from app.models.user import User
 from app.models.note import Note
 from app.models.review import Review, ReviewType
 from app.core.config import settings
+from app.services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,15 @@ def generate_daily_review(
         
         user_uuid = UUID(user_id)
         
+        # CRITICAL: Check if this task is still valid (not cancelled)
+        current_task_id = self.request.id
+        if not task_manager.is_task_valid(user_uuid, current_task_id):
+            logger.info(f"Task {current_task_id} is no longer valid for user {user_id}, skipping execution")
+            return {
+                "status": "cancelled",
+                "message": "Task was cancelled or replaced"
+            }
+        
         if target_date:
             review_date = date.fromisoformat(target_date)
         else:
@@ -119,6 +129,9 @@ def generate_daily_review(
                         eta=tomorrow_same_time
                     )
                     
+                    # Register new task with TaskManager
+                    task_manager.register_task(user_uuid, task.id)
+                    
                     # Update task ID in user record
                     user.daily_review_task_id = task.id
                     self.db.commit()
@@ -159,6 +172,9 @@ def generate_daily_review(
                         kwargs={'user_timezone': user_timezone},
                         eta=tomorrow_same_time
                     )
+                    
+                    # Register new task with TaskManager
+                    task_manager.register_task(user_uuid, task.id)
                     
                     # Update task ID in user record
                     user.daily_review_task_id = task.id
@@ -389,6 +405,9 @@ Only award XP to skills that were clearly practiced based on the journal entries
                         kwargs={'user_timezone': user_timezone},
                         eta=tomorrow_same_time
                     )
+                    
+                    # Register new task with TaskManager
+                    task_manager.register_task(user_uuid, task.id)
                     
                     # Update task ID in user record
                     user.daily_review_task_id = task.id

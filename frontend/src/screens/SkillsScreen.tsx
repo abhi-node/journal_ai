@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -8,7 +8,6 @@ import {
   RefreshControl, 
   ActivityIndicator,
   Animated,
-  Pressable,
   TouchableOpacity,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -149,15 +148,13 @@ const SkillsScreen = () => {
         variant="elevated"
         animationType="scale"
         delay={index * 100}
-        style={[
-          styles.skillCard,
-          { 
-            borderColor: rankColor,
-            borderLeftColor: rankColor,
-            width: CARD_WIDTH,
-          },
-          isSelected ? styles.selectedCard : {},
-        ]}
+        style={{
+          ...styles.skillCard,
+          borderColor: rankColor,
+          borderLeftColor: rankColor,
+          width: CARD_WIDTH,
+          ...(isSelected ? styles.selectedCard : {}),
+        } as any}
         onPress={() => setSelectedSkill(isSelected ? null : skillName)}
       >
         <View style={styles.cardContentRow}>

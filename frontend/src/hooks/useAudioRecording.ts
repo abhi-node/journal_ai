@@ -13,6 +13,7 @@ interface UseAudioRecordingOptions {
   onTranscriptionComplete?: (text: string) => void;
   onNoteSaved?: (noteId: string, date: string) => void;
   onError?: (error: string) => void;
+  onTranscriptionError?: (error: string) => void;
 }
 
 export const useAudioRecording = (options: UseAudioRecordingOptions = {}) => {

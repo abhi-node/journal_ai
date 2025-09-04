@@ -34,6 +34,9 @@ export const theme = {
       card: ['#FFFFFF', '#FAFAFA'],
     },
     
+    // Borders
+    border: '#E5E5E5',      // Default border color
+    
     // Shadows and Overlays
     shadow: 'rgba(0, 0, 0, 0.06)',
     overlay: 'rgba(0, 0, 0, 0.03)',
@@ -53,6 +56,7 @@ export const theme = {
     md: 16,
     lg: 24,
     xl: 32,
+    xxl: 40,
     full: 9999,
   },
   

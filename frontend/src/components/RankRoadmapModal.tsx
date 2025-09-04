@@ -11,6 +11,7 @@ import {
   Image,
   Platform,
   SafeAreaView,
+  ColorValue,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -146,7 +147,7 @@ const RankRoadmapModal: React.FC<RankRoadmapModalProps> = ({
       >
         {rank.special_effect === 'rainbow' ? (
           <LinearGradient
-            colors={['#FFD0F0', '#FFE0D0', '#FFFFD0', '#D0FFD0', '#D0F0FF', '#E0D0FF', '#FFD0FF']}
+            colors={['#FFD0F0', '#FFE0D0', '#FFFFD0', '#D0FFD0', '#D0F0FF', '#E0D0FF', '#FFD0FF'] as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.rankGradient}
@@ -155,7 +156,7 @@ const RankRoadmapModal: React.FC<RankRoadmapModalProps> = ({
           </LinearGradient>
         ) : (
           <LinearGradient
-            colors={[rank.gradient_start, rank.gradient_end]}
+            colors={[rank.gradient_start, rank.gradient_end] as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.rankGradient}

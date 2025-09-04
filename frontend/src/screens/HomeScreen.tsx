@@ -8,6 +8,7 @@ import {
   Pressable,
   Vibration,
   ScrollView,
+  ColorValue,
 } from 'react-native';
 import { useSelector } from 'react-redux';
 import { RootState } from '../store';
@@ -257,7 +258,7 @@ const HomeScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
-        colors={theme.colors.gradients.soft}
+        colors={theme.colors.gradients.soft as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
         style={styles.gradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
@@ -288,7 +289,7 @@ const HomeScreen = () => {
                   Welcome back
                 </Text>
                 <Text style={styles.userName}>
-                  {user?.first_name || user?.name || user?.username || 'Friend'}
+                  {user?.name || 'Friend'}
                 </Text>
               </AnimatedCard>
             </Animated.View>
@@ -351,10 +352,10 @@ const HomeScreen = () => {
                   }}
                 >
                   <LinearGradient
-                    colors={isHolding ? 
+                    colors={(isHolding ? 
                       [theme.colors.error, '#D68080'] : 
                       [theme.colors.primary, theme.colors.secondary]
-                    }
+                    ) as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
                     style={styles.recordButton}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}

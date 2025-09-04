@@ -1,12 +1,12 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, Animated, Dimensions, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, Animated, StyleSheet, ColorValue } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Path } from 'react-native-svg';
 import { theme } from '../theme';
 
-const { width, height } = Dimensions.get('window');
+// const { width } = Dimensions.get('window');
 
 const WelcomeScreen = () => {
   const navigation = useNavigation<any>();
@@ -56,7 +56,7 @@ const WelcomeScreen = () => {
 
   return (
     <LinearGradient
-      colors={theme.colors.gradients.soft}
+      colors={theme.colors.gradients.soft as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]] as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
       style={{ flex: 1 }}
       start={{ x: 0, y: 0 }}
       end={{ x: 0, y: 1 }}
@@ -119,7 +119,7 @@ const WelcomeScreen = () => {
               {/* App Icon/Logo */}
               <View className="mb-6">
                 <LinearGradient
-                  colors={theme.colors.gradients.primary}
+                  colors={theme.colors.gradients.primary as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]] as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
                   style={styles.logoGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
@@ -201,7 +201,7 @@ const WelcomeScreen = () => {
                 className="overflow-hidden rounded-3xl"
               >
                 <LinearGradient
-                  colors={theme.colors.gradients.primary}
+                  colors={theme.colors.gradients.primary as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]] as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
                   style={styles.button}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.celery_app import celery_app
 from app.models.user import User
+from app.services.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 
@@ -94,13 +95,14 @@ class ReviewScheduler:
             if not user:
                 raise ValueError(f"User {user_id} not found")
             
-            # 1. Revoke existing task if exists
+            # 1. Cancel and delete existing task if exists
             if user.daily_review_task_id:
-                logger.info(f"Revoking existing task {user.daily_review_task_id} for user {user_id}")
+                logger.info(f"Cancelling and deleting existing task {user.daily_review_task_id} for user {user_id}")
                 try:
-                    AsyncResult(user.daily_review_task_id, app=celery_app).revoke()
+                    # Use TaskManager to properly delete the task
+                    task_manager.cancel_and_delete_task(user_id, user.daily_review_task_id)
                 except Exception as e:
-                    logger.warning(f"Error revoking task {user.daily_review_task_id}: {str(e)}")
+                    logger.warning(f"Error cancelling task {user.daily_review_task_id}: {str(e)}")
             
             # 2. Check if daily review already exists for today
             today_user_tz = get_user_current_date(user_timezone)
@@ -146,12 +148,15 @@ class ReviewScheduler:
                 eta=next_review_utc
             )
             
-            # 5. Update user record with new task ID and time
+            # 5. Register task with TaskManager
+            task_manager.register_task(user_id, task.id)
+            
+            # 6. Update user record with new task ID and time
             user.daily_review_task_id = task.id
             user.daily_review_time = review_time
             db.commit()
             
-            logger.info(f"Successfully scheduled review task {task.id} for user {user_id}")
+            logger.info(f"Successfully scheduled and registered review task {task.id} for user {user_id}")
             
             return task.id, next_review_utc
             
@@ -193,11 +198,14 @@ class ReviewScheduler:
                 eta=tomorrow_utc
             )
             
+            # Register task with TaskManager
+            task_manager.register_task(UUID(user_id), task.id)
+            
             # Update user's task ID
             user.daily_review_task_id = task.id
             db.commit()
             
-            logger.info(f"Scheduled next review task {task.id} for user {user_id} at {tomorrow_utc}")
+            logger.info(f"Scheduled and registered next review task {task.id} for user {user_id} at {tomorrow_utc}")
             
             return task.id
             
@@ -225,8 +233,8 @@ class ReviewScheduler:
                 logger.info(f"No scheduled review to cancel for user {user_id}")
                 return False
             
-            # Revoke the task
-            AsyncResult(user.daily_review_task_id, app=celery_app).revoke()
+            # Cancel and delete the task properly
+            task_manager.cancel_and_delete_task(user_id, user.daily_review_task_id)
             
             # Clear the task ID and time
             user.daily_review_task_id = None

@@ -134,6 +134,7 @@ export const AnimatedCard: React.FC<AnimatedCardProps> = ({
       backgroundColor: theme.colors.surface,
       borderRadius: theme.borderRadius.lg,
       padding: theme.spacing.lg,
+      overflow: 'hidden' as 'hidden',
     };
 
     switch (variant) {
@@ -160,17 +161,20 @@ export const AnimatedCard: React.FC<AnimatedCardProps> = ({
   };
 
   const getAnimatedStyle = () => {
-    const transforms = [{ scale: pressAnim }];
+    let transforms: any[] = [];
 
     switch (animationType) {
       case 'scale':
-        transforms.push({ scale: scaleAnim });
+        transforms = [{ scale: Animated.multiply(pressAnim, scaleAnim) }];
         break;
       case 'slide':
-        transforms.push({ translateY: slideAnim });
+        transforms = [{ scale: pressAnim }, { translateY: slideAnim }];
         break;
       case 'bounce':
-        transforms.push({ scale: scaleAnim });
+        transforms = [{ scale: Animated.multiply(pressAnim, scaleAnim) }];
+        break;
+      default:
+        transforms = [{ scale: pressAnim }];
         break;
     }
 
@@ -190,7 +194,7 @@ export const AnimatedCard: React.FC<AnimatedCardProps> = ({
           disabled={disabled}
           {...props}
         >
-          <View style={[styles.card, getCardStyle()]}>
+          <View style={getCardStyle()}>
             {children}
           </View>
         </Pressable>
@@ -199,7 +203,7 @@ export const AnimatedCard: React.FC<AnimatedCardProps> = ({
   }
 
   return (
-    <Animated.View style={[styles.card, getCardStyle(), getAnimatedStyle()]}>
+    <Animated.View style={[getCardStyle(), getAnimatedStyle()]}>
       {children}
     </Animated.View>
   );

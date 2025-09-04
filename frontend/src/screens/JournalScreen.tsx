@@ -14,6 +14,7 @@ import {
   Pressable,
   Platform,
   Modal,
+  ColorValue,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -317,7 +318,12 @@ const JournalScreen = () => {
           variant="elevated"
           animationType="slide"
           delay={index * 50}
-          style={[styles.reviewCard, { borderWidth: 2, borderColor: color, borderLeftWidth: 4 }]}
+          style={{
+            ...styles.reviewCard,
+            borderWidth: 2,
+            borderColor: color,
+            borderLeftWidth: 4,
+          }}
         >
           <View style={styles.reviewContent}>
             <View style={styles.reviewHeader}>
@@ -365,7 +371,7 @@ const JournalScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
-        colors={theme.colors.gradients.soft}
+        colors={theme.colors.gradients.soft as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
         style={styles.gradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
@@ -543,7 +549,7 @@ const JournalScreen = () => {
                 style={styles.updateButton}
               >
                 <LinearGradient
-                  colors={theme.colors.gradients.primary}
+                  colors={theme.colors.gradients.primary as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
                   style={styles.updateGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}

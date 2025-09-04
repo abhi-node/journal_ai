@@ -38,6 +38,7 @@ const JournalScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [scheduleData, setScheduleData] = useState<any>(null);
   const [selectedTime, setSelectedTime] = useState(new Date());
+  const [tempSelectedTime, setTempSelectedTime] = useState(new Date()); // Temporary time selection
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [isUpdatingSchedule, setIsUpdatingSchedule] = useState(false);
   
@@ -153,6 +154,7 @@ const JournalScreen = () => {
         const localTime = new Date();
         localTime.setHours(hours, minutes, 0, 0);
         setSelectedTime(localTime);
+        setTempSelectedTime(localTime); // Initialize temp time as well
       }
     } catch (error) {
       console.error('Error loading schedule:', error);
@@ -163,19 +165,20 @@ const JournalScreen = () => {
     setIsUpdatingSchedule(true);
     try {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const timeString = `${selectedTime.getHours().toString().padStart(2, '0')}:${selectedTime.getMinutes().toString().padStart(2, '0')}`;
+      const timeString = `${tempSelectedTime.getHours().toString().padStart(2, '0')}:${tempSelectedTime.getMinutes().toString().padStart(2, '0')}`;
       
       await usersAPI.updateReviewSchedule({
         time: timeString,
         timezone: timezone
       });
       
+      setSelectedTime(tempSelectedTime); // Save the confirmed time
       await loadSchedule();
       
       Alert.alert(
         'Schedule Updated',
-        `Your daily review is now scheduled for ${formatTime(selectedTime)}`,
-        [{ text: 'OK' }]
+        `Your daily review is now scheduled for ${formatTime(tempSelectedTime)}`,
+        [{ text: 'OK', onPress: () => setShowTimePicker(false) }]
       );
     } catch (error: any) {
       Alert.alert(
@@ -191,7 +194,16 @@ const JournalScreen = () => {
   const onTimeChange = (hours: number, minutes: number) => {
     const newTime = new Date();
     newTime.setHours(hours, minutes, 0, 0);
-    setSelectedTime(newTime);
+    setTempSelectedTime(newTime); // Only update temporary time
+  };
+  
+  const openTimePicker = () => {
+    setTempSelectedTime(selectedTime); // Reset temp time to saved time
+    setShowTimePicker(true);
+  };
+  
+  const closeTimePicker = () => {
+    setTempSelectedTime(selectedTime); // Reset to saved time on cancel
     setShowTimePicker(false);
   };
 
@@ -322,7 +334,6 @@ const JournalScreen = () => {
             ...styles.reviewCard,
             borderWidth: 2,
             borderColor: color,
-            borderLeftWidth: 4,
           }}
         >
           <View style={styles.reviewContent}>
@@ -461,7 +472,7 @@ const JournalScreen = () => {
           )}
         </Animated.View>
 
-        {/* Review Schedule Section */}
+        {/* Review Schedule Section - Minimal Design */}
         {activeTab === 'reviews' && !loading && (
           <Animated.View 
             style={[
@@ -469,35 +480,31 @@ const JournalScreen = () => {
               { opacity: fadeAnim }
             ]}
           >
-            <AnimatedCard variant="elevated" style={styles.scheduleCard}>
-              <Text style={styles.scheduleTitle}>Daily Review Schedule</Text>
-              
-              {scheduleData?.scheduled && (
-                <Text style={styles.currentSchedule}>
-                  Currently scheduled for {formatTime(selectedTime)}
-                </Text>
-              )}
-              
-              <TouchableOpacity 
-                onPress={() => setShowTimePicker(true)}
-                style={styles.timeSelector}
-              >
-                <Text style={styles.timeSelectorText}>
-                  {formatTime(selectedTime)}
-                </Text>
-                <Text style={styles.timeSelectorIcon}>⏰</Text>
-              </TouchableOpacity>
+            <TouchableOpacity 
+              onPress={openTimePicker}
+              style={styles.minimalScheduleButton}
+            >
+              <Text style={styles.scheduleLabel}>Daily Review</Text>
+              <View style={styles.timeDisplay}>
+                <Text style={styles.timeText}>{formatTime(selectedTime)}</Text>
+              </View>
+            </TouchableOpacity>
               
               {/* Time Picker Modal */}
               <Modal
                 visible={showTimePicker}
                 transparent={true}
                 animationType="slide"
-                onRequestClose={() => setShowTimePicker(false)}
+                onRequestClose={closeTimePicker}
               >
-                <View style={styles.modalOverlay}>
-                  <View style={styles.timePickerModal}>
-                    <Text style={styles.modalTitle}>Select Time</Text>
+                <Pressable style={styles.modalOverlay} onPress={closeTimePicker}>
+                  <Pressable style={styles.timePickerModal} onPress={(e) => e.stopPropagation()}>
+                    <Text style={styles.modalTitle}>Select Review Time</Text>
+                    
+                    <View style={styles.currentTimeInfo}>
+                      <Text style={styles.currentTimeLabel}>Selected:</Text>
+                      <Text style={styles.currentTimeDisplay}>{formatTime(tempSelectedTime)}</Text>
+                    </View>
                     
                     <View style={styles.timePickerContainer}>
                       <ScrollView 
@@ -513,16 +520,16 @@ const JournalScreen = () => {
                               key={`${hour}-${minute}`}
                               style={[
                                 styles.timeOption,
-                                selectedTime.getHours() === hour && 
-                                selectedTime.getMinutes() === minute && 
+                                tempSelectedTime.getHours() === hour && 
+                                tempSelectedTime.getMinutes() === minute && 
                                 styles.selectedTimeOption
                               ]}
                               onPress={() => onTimeChange(hour, minute)}
                             >
                               <Text style={[
                                 styles.timeOptionText,
-                                selectedTime.getHours() === hour && 
-                                selectedTime.getMinutes() === minute && 
+                                tempSelectedTime.getHours() === hour && 
+                                tempSelectedTime.getMinutes() === minute && 
                                 styles.selectedTimeText
                               ]}>
                                 {`${displayHour}:${minute.toString().padStart(2, '0')} ${period}`}
@@ -533,35 +540,36 @@ const JournalScreen = () => {
                       </ScrollView>
                     </View>
                     
-                    <TouchableOpacity
-                      style={styles.modalCloseButton}
-                      onPress={() => setShowTimePicker(false)}
-                    >
-                      <Text style={styles.modalCloseText}>Cancel</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+                    <View style={styles.modalActions}>
+                      <TouchableOpacity
+                        style={styles.modalCancelButton}
+                        onPress={closeTimePicker}
+                      >
+                        <Text style={styles.modalCancelText}>Cancel</Text>
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity
+                        onPress={handleUpdateSchedule}
+                        disabled={isUpdatingSchedule}
+                        style={styles.modalUpdateButton}
+                      >
+                        <LinearGradient
+                          colors={theme.colors.gradients.primary as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
+                          style={styles.modalUpdateGradient}
+                          start={{ x: 0, y: 0 }}
+                          end={{ x: 1, y: 0 }}
+                        >
+                          {isUpdatingSchedule ? (
+                            <ActivityIndicator size="small" color="white" />
+                          ) : (
+                            <Text style={styles.modalUpdateText}>Update Schedule</Text>
+                          )}
+                        </LinearGradient>
+                      </TouchableOpacity>
+                    </View>
+                  </Pressable>
+                </Pressable>
               </Modal>
-              
-              <TouchableOpacity
-                onPress={handleUpdateSchedule}
-                disabled={isUpdatingSchedule}
-                style={styles.updateButton}
-              >
-                <LinearGradient
-                  colors={theme.colors.gradients.primary as unknown as readonly [ColorValue, ColorValue, ...ColorValue[]]}
-                  style={styles.updateGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                >
-                  {isUpdatingSchedule ? (
-                    <ActivityIndicator size="small" color="white" />
-                  ) : (
-                    <Text style={styles.updateText}>Update Schedule</Text>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-            </AnimatedCard>
           </Animated.View>
         )}
       </LinearGradient>
@@ -749,59 +757,33 @@ const styles = StyleSheet.create({
   },
   scheduleContainer: {
     position: 'absolute',
-    bottom: theme.spacing.xxl + 80,
+    bottom: 100,
     left: theme.spacing.lg,
     right: theme.spacing.lg,
   },
-  scheduleCard: {
-    padding: theme.spacing.lg,
-    alignItems: 'center',
-  },
-  scheduleTitle: {
-    fontSize: theme.typography.fontSize.lg,
-    fontFamily: theme.typography.fontFamily.semibold,
-    color: theme.colors.text.primary,
-    marginBottom: theme.spacing.md,
-  },
-  currentSchedule: {
-    fontSize: theme.typography.fontSize.sm,
-    fontFamily: theme.typography.fontFamily.regular,
-    color: theme.colors.text.secondary,
-    marginBottom: theme.spacing.md,
-  },
-  timeSelector: {
+  minimalScheduleButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: theme.colors.surface,
     paddingVertical: theme.spacing.md,
     paddingHorizontal: theme.spacing.lg,
-    borderRadius: theme.borderRadius.md,
-    marginBottom: theme.spacing.lg,
-    ...elevation(2),
-  },
-  timeSelectorText: {
-    fontSize: theme.typography.fontSize.xl,
-    fontFamily: theme.typography.fontFamily.medium,
-    color: theme.colors.text.primary,
-    marginRight: theme.spacing.sm,
-  },
-  timeSelectorIcon: {
-    fontSize: 24,
-  },
-  updateButton: {
-    width: '100%',
-    borderRadius: theme.borderRadius.lg,
-    overflow: 'hidden',
+    borderRadius: theme.borderRadius.xl,
     ...elevation(3),
   },
-  updateGradient: {
-    paddingVertical: theme.spacing.md,
+  scheduleLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.medium,
+    color: theme.colors.text.secondary,
+  },
+  timeDisplay: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  updateText: {
-    fontSize: theme.typography.fontSize.md,
+  timeText: {
+    fontSize: theme.typography.fontSize.lg,
     fontFamily: theme.typography.fontFamily.semibold,
-    color: theme.colors.text.inverse,
+    color: theme.colors.text.primary,
   },
   modalOverlay: {
     flex: 1,
@@ -849,15 +831,58 @@ const styles = StyleSheet.create({
     color: theme.colors.text.inverse,
     fontFamily: theme.typography.fontFamily.semibold,
   },
-  modalCloseButton: {
-    marginTop: theme.spacing.md,
-    paddingVertical: theme.spacing.sm,
+  currentTimeInfo: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: theme.spacing.lg,
+    padding: theme.spacing.md,
+    backgroundColor: theme.colors.accent,
+    borderRadius: theme.borderRadius.md,
   },
-  modalCloseText: {
+  currentTimeLabel: {
+    fontSize: theme.typography.fontSize.sm,
+    fontFamily: theme.typography.fontFamily.regular,
+    color: theme.colors.text.secondary,
+    marginRight: theme.spacing.sm,
+  },
+  currentTimeDisplay: {
+    fontSize: theme.typography.fontSize.lg,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.primary,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: theme.spacing.lg,
+    gap: theme.spacing.md,
+  },
+  modalCancelButton: {
+    flex: 1,
+    paddingVertical: theme.spacing.md,
+    alignItems: 'center',
+    backgroundColor: theme.colors.accent,
+    borderRadius: theme.borderRadius.md,
+  },
+  modalCancelText: {
     fontSize: theme.typography.fontSize.md,
     fontFamily: theme.typography.fontFamily.medium,
     color: theme.colors.text.secondary,
+  },
+  modalUpdateButton: {
+    flex: 1,
+    borderRadius: theme.borderRadius.md,
+    overflow: 'hidden',
+    ...elevation(2),
+  },
+  modalUpdateGradient: {
+    paddingVertical: theme.spacing.md,
+    alignItems: 'center',
+  },
+  modalUpdateText: {
+    fontSize: theme.typography.fontSize.md,
+    fontFamily: theme.typography.fontFamily.semibold,
+    color: theme.colors.text.inverse,
   },
 });
 

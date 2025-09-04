@@ -151,10 +151,9 @@ const SkillsScreen = () => {
         style={{
           ...styles.skillCard,
           borderColor: rankColor,
-          borderLeftColor: rankColor,
           width: CARD_WIDTH,
           ...(isSelected ? styles.selectedCard : {}),
-        } as any}
+        }}
         onPress={() => setSelectedSkill(isSelected ? null : skillName)}
       >
         <View style={styles.cardContentRow}>
@@ -418,7 +417,6 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.lg,
     backgroundColor: theme.colors.surface,
     borderWidth: 2,
-    borderLeftWidth: 5,
     borderRadius: theme.borderRadius.xl,
     marginHorizontal: 0,
     shadowColor: '#000',

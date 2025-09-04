@@ -17,7 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useAudioRecording } from '../hooks/useAudioRecording';
 import { theme, elevation } from '../theme';
-import { AnimatedCard, FloatingElement } from '../components/ui';
+import { FloatingElement } from '../components/ui';
 
 const { width, height } = Dimensions.get('window');
 
@@ -211,6 +211,10 @@ const HomeScreen = () => {
     // Stop ripple animation
     rippleAnimationRef.current?.stop();
     
+    // Immediately reset ripple values to avoid freeze
+    rippleAnim.setValue(0);
+    rippleOpacity.setValue(0);
+    
     // Reset animations
     Animated.parallel([
       Animated.spring(recordButtonScale, {
@@ -220,16 +224,6 @@ const HomeScreen = () => {
         useNativeDriver: true,
       }),
       Animated.timing(recordingIndicatorAnim, {
-        toValue: 0,
-        duration: theme.animation.duration.fast,
-        useNativeDriver: true,
-      }),
-      Animated.timing(rippleAnim, {
-        toValue: 0,
-        duration: theme.animation.duration.fast,
-        useNativeDriver: true,
-      }),
-      Animated.timing(rippleOpacity, {
         toValue: 0,
         duration: theme.animation.duration.fast,
         useNativeDriver: true,
@@ -280,18 +274,14 @@ const HomeScreen = () => {
                 }
               ]}
             >
-              <AnimatedCard 
-                variant="flat" 
-                style={styles.welcomeCard}
-                animationType="fade"
-              >
+              <View style={styles.welcomeCard}>
                 <Text style={styles.greeting}>
                   Welcome back
                 </Text>
                 <Text style={styles.userName}>
                   {user?.name || 'Friend'}
                 </Text>
-              </AnimatedCard>
+              </View>
             </Animated.View>
           </View>
           
@@ -429,11 +419,11 @@ const HomeScreen = () => {
                   },
                 ]}
               >
-                <AnimatedCard variant="elevated" style={styles.statusCard}>
+                <View style={styles.statusCard}>
                   <Text style={styles.statusText}>
                     {statusMessage}
                   </Text>
-                </AnimatedCard>
+                </View>
               </Animated.View>
             )}
           </View>
@@ -462,8 +452,7 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.xl,
   },
   welcomeCard: {
-    backgroundColor: 'transparent',
-    padding: 0,
+    // Simple container with no special borders or backgrounds
   },
   greeting: {
     fontSize: theme.typography.fontSize.lg,
@@ -547,6 +536,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.lg,
     paddingVertical: theme.spacing.md,
     backgroundColor: theme.colors.surface,
+    borderRadius: theme.borderRadius.lg,
+    ...elevation(4),
   },
   statusText: {
     fontSize: theme.typography.fontSize.md,

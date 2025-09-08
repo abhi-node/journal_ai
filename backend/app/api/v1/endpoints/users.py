@@ -203,10 +203,11 @@ def update_review_schedule(
         
         logger.info(f"Updated review schedule for user {current_user.id}: task {task_id} at {next_review_utc}")
         
+        # next_review_utc is already an ISO string from the scheduler
         return {
             "success": True,
             "task_id": task_id,
-            "next_review_utc": next_review_utc.isoformat(),
+            "next_review_utc": next_review_utc,
             "time_utc": review_time.isoformat()
         }
         

@@ -1,6 +1,10 @@
+"""
+Simplified review task generation with idempotency and proper scheduling.
+"""
+
 import json
 import logging
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 from uuid import UUID
 from datetime import date, datetime, timezone
 from celery import Task
@@ -57,7 +61,12 @@ def generate_daily_review(
     user_timezone: str = None
 ) -> Dict[str, any]:
     """
-    Generate a daily review for a user using AI.
+    Generate a daily review for a user using AI with idempotency guarantees.
+    
+    This task ensures:
+    1. Only one review per user per day (idempotency)
+    2. Automatic scheduling of next review after completion
+    3. Proper handling of edge cases (no notes, existing reviews)
     
     Args:
         user_id: The user's ID as string
@@ -72,15 +81,7 @@ def generate_daily_review(
         
         user_uuid = UUID(user_id)
         
-        # CRITICAL: Check if this task is still valid (not cancelled)
-        current_task_id = self.request.id
-        if not task_manager.is_task_valid(user_uuid, current_task_id):
-            logger.info(f"Task {current_task_id} is no longer valid for user {user_id}, skipping execution")
-            return {
-                "status": "cancelled",
-                "message": "Task was cancelled or replaced"
-            }
-        
+        # Determine the review date
         if target_date:
             review_date = date.fromisoformat(target_date)
         else:
@@ -88,6 +89,20 @@ def generate_daily_review(
             tz = user_timezone or get_default_timezone()
             review_date = get_user_current_date(tz)
         
+        # CRITICAL: Check idempotency - has this review already been generated?
+        if task_manager.check_idempotency(user_uuid, review_date):
+            logger.info(f"Review already processed for user {user_id} on {review_date} (idempotency check)")
+            
+            # Still schedule next review to maintain the chain
+            task_manager.schedule_next_daily_review(user_uuid, user_timezone)
+            
+            return {
+                "status": "exists",
+                "message": "Daily review already exists for this date (idempotency)",
+                "date": review_date.isoformat()
+            }
+        
+        # Get the user
         user = self.db.query(User).filter(User.id == user_uuid).first()
         if not user:
             logger.error(f"User {user_id} not found")
@@ -95,6 +110,7 @@ def generate_daily_review(
         
         logger.info(f"Generating daily review for user {user_id} on {review_date}")
         
+        # Check OpenAI client
         if not openai_client:
             logger.error("OpenAI client not initialized")
             return {
@@ -102,7 +118,7 @@ def generate_daily_review(
                 "message": "OpenAI service is not available"
             }
         
-        # Check if review already exists for this date
+        # Double-check if review already exists in database
         existing_review = self.db.query(Review).filter(
             and_(
                 Review.user_id == user_uuid,
@@ -112,39 +128,19 @@ def generate_daily_review(
         ).first()
         
         if existing_review:
-            logger.info(f"Daily review already exists for user {user_id} on {review_date}")
+            logger.info(f"Daily review already exists in database for user {user_id} on {review_date}")
             
-            # Schedule next review but skip this one
-            if user.daily_review_time:
-                from app.services.review_scheduler import ReviewScheduler
-                from datetime import timedelta
-                
-                # Schedule for same time tomorrow (24 hours from now)
-                tomorrow_same_time = datetime.now(timezone.utc) + timedelta(days=1)
-                
-                try:
-                    task = generate_daily_review.apply_async(
-                        args=[user_id],
-                        kwargs={'user_timezone': user_timezone},
-                        eta=tomorrow_same_time
-                    )
-                    
-                    # Register new task with TaskManager
-                    task_manager.register_task(user_uuid, task.id)
-                    
-                    # Update task ID in user record
-                    user.daily_review_task_id = task.id
-                    self.db.commit()
-                    
-                    logger.info(f"Review already exists, scheduled next review for {user_id} at {tomorrow_same_time}")
-                    
-                except Exception as scheduling_error:
-                    logger.error(f"Failed to schedule next review after finding existing: {str(scheduling_error)}")
+            # Set idempotency key to prevent future duplicates
+            task_manager.set_idempotency_key(user_uuid, review_date)
+            
+            # Schedule next review
+            task_manager.schedule_next_daily_review(user_uuid, user_timezone)
             
             return {
                 "status": "exists",
-                "message": "Daily review already exists for this date",
-                "review_id": str(existing_review.id)
+                "message": "Daily review already exists in database",
+                "review_id": str(existing_review.id),
+                "date": review_date.isoformat()
             }
         
         # Check if notes exist for the day
@@ -158,39 +154,16 @@ def generate_daily_review(
         if not notes:
             logger.warning(f"No notes found for user {user_id} on {review_date}")
             
-            # No notes exist, schedule for next day instead
-            if user.daily_review_time:
-                from app.services.review_scheduler import ReviewScheduler
-                from datetime import timedelta
-                
-                # Schedule for same time tomorrow (24 hours from now)
-                tomorrow_same_time = datetime.now(timezone.utc) + timedelta(days=1)
-                
-                try:
-                    task = generate_daily_review.apply_async(
-                        args=[user_id],
-                        kwargs={'user_timezone': user_timezone},
-                        eta=tomorrow_same_time
-                    )
-                    
-                    # Register new task with TaskManager
-                    task_manager.register_task(user_uuid, task.id)
-                    
-                    # Update task ID in user record
-                    user.daily_review_task_id = task.id
-                    self.db.commit()
-                    
-                    logger.info(f"No notes found, rescheduled review for user {user_id} to {tomorrow_same_time}")
-                    
-                except Exception as scheduling_error:
-                    logger.error(f"Failed to reschedule review after no notes: {str(scheduling_error)}")
+            # Schedule for tomorrow since no content to review
+            task_manager.schedule_next_daily_review(user_uuid, user_timezone)
             
             return {
                 "status": "no_notes",
-                "message": "No notes found for this date, rescheduled for tomorrow"
+                "message": "No notes found for this date, scheduled for tomorrow",
+                "date": review_date.isoformat()
             }
         
-        # Extract content from JSON structure
+        # Extract and combine notes content
         combined_notes_parts = []
         for note in notes:
             if note.content:
@@ -205,12 +178,12 @@ def generate_daily_review(
         
         combined_notes = "\n\n".join(combined_notes_parts)
         
+        # Get user goals and stats
         user_goals = user.goals or {}
         user_stats = user.stats or {}
         skill_categories = user_stats.get("skill_categories", {})
         
-        leveling_chart = XPLevelingSystem.get_leveling_chart(1, 20)
-        
+        # Generate the review using AI
         system_prompt = """You are an AI life coach analyzing a user's daily journal entries and goals to generate a visually engaging daily review.
 
 You must generate a review in the following JSON format:
@@ -298,16 +271,17 @@ USER'S CURRENT SKILL LEVELS:
 
 Generate a visually-focused daily review that:
 1. Creates a headline and 3 key moments (morning/afternoon/evening or specific times)
-2. Lists 2-3 specific achievements (be concrete, not vague)
+2. Lists 3 specific achievements (be concrete, not vague)
 3. ONLY includes skills that were actually practiced (no zero XP entries)
-4. Provides 1-2 constructive growth areas with brief explanations
-5. Sets a clear primary focus for tomorrow with 2 quick wins
+4. Provides 3 constructive growth areas with brief explanations
+5. Sets a clear primary focus for tomorrow with 3 quick wins
 6. Calculates accurate daily statistics
 
 Remember: Keep all text extremely concise (10-15 words max per item).
 Only award XP to skills that were clearly practiced based on the journal entries."""
 
         try:
+            # Generate review with AI
             response = openai_client.chat.completions.create(
                 model="gpt-5",
                 messages=[
@@ -320,10 +294,12 @@ Only award XP to skills that were clearly practiced based on the journal entries
             
             review_content = json.loads(response.choices[0].message.content)
             
+            # Ensure score is within bounds
             if "score" not in review_content:
                 review_content["score"] = 70
             review_content["score"] = max(0, min(100, review_content["score"]))
             
+            # Create the review record
             new_review = Review(
                 user_id=user_uuid,
                 type=ReviewType.DAILY,
@@ -334,17 +310,13 @@ Only award XP to skills that were clearly practiced based on the journal entries
             )
             self.db.add(new_review)
             
-            # Handle both new format (skills_practiced) and old format (xp_earned) for backward compatibility
+            # Update user stats with XP earned
             skills_practiced = review_content.get("skills_practiced", {})
             xp_earned = {}
             
-            # Extract XP from new format
             if skills_practiced:
                 for skill_name, skill_data in skills_practiced.items():
                     xp_earned[skill_name] = skill_data.get("xp_gained", 0)
-            # Fall back to old format if new format not present
-            elif "xp_earned" in review_content:
-                xp_earned = review_content["xp_earned"]
             
             if xp_earned:
                 updated_stats = user_stats.copy()
@@ -363,10 +335,9 @@ Only award XP to skills that were clearly practiced based on the journal entries
                         
                         total_xp_gained += xp_amount
                         
-                        # Update level_progress in the review content if using new format
+                        # Update level progress in review content
                         if skills_practiced and skill_name in skills_practiced:
                             skills_practiced[skill_name]["level_progress"]["current"] = xp_update["level"]
-                            # Calculate progress percent
                             level_xp = xp_update["xp_in_current_level"]
                             xp_for_level = xp_update["xp_for_next_level"]
                             progress_percent = int((level_xp / xp_for_level) * 100) if xp_for_level > 0 else 0
@@ -378,49 +349,35 @@ Only award XP to skills that were clearly practiced based on the journal entries
                 updated_stats["skill_categories"] = updated_skills
                 updated_stats["total_xp"] = updated_stats.get("total_xp", 0) + total_xp_gained
                 
+                # Update overall user level
                 user_total_xp = updated_stats["total_xp"]
                 user_level_info = XPLevelingSystem.calculate_level_from_xp(user_total_xp)
                 updated_stats["level"] = user_level_info[0]
                 
                 user.stats = updated_stats
             
+            # Commit the review and stats update
             self.db.commit()
             self.db.refresh(new_review)
+            
+            # Set idempotency key to prevent future duplicates
+            task_manager.set_idempotency_key(user_uuid, review_date)
             
             logger.info(f"Successfully generated daily review for user {user_id}")
             logger.info(f"Review score: {review_content['score']}")
             logger.info(f"XP awarded: {json.dumps(xp_earned)}")
             
-            # Schedule next review (24 hours later) if user has scheduling enabled
-            if user.daily_review_time:
-                from app.services.review_scheduler import ReviewScheduler
-                from datetime import timedelta
-                
-                # Schedule for same time tomorrow (24 hours from now)
-                tomorrow_same_time = datetime.now(timezone.utc) + timedelta(days=1)
-                
-                try:
-                    task = generate_daily_review.apply_async(
-                        args=[user_id],
-                        kwargs={'user_timezone': user_timezone},
-                        eta=tomorrow_same_time
-                    )
-                    
-                    # Register new task with TaskManager
-                    task_manager.register_task(user_uuid, task.id)
-                    
-                    # Update task ID in user record
-                    user.daily_review_task_id = task.id
-                    self.db.commit()
-                    
-                    logger.info(f"Scheduled next review for user {user_id} at {tomorrow_same_time} (task: {task.id})")
-                    
-                except Exception as scheduling_error:
-                    logger.error(f"Failed to schedule next review for user {user_id}: {str(scheduling_error)}")
+            # Schedule next review for tomorrow
+            task_id = task_manager.schedule_next_daily_review(user_uuid, user_timezone)
             
-            # Include daily_stats if present in new format
+            if task_id:
+                logger.info(f"Scheduled next review for user {user_id} (task: {task_id})")
+            else:
+                logger.warning(f"Failed to schedule next review for user {user_id}")
+            
+            # Include daily stats
             daily_stats = review_content.get("daily_stats", {
-                "total_xp": total_xp_gained if 'total_xp_gained' in locals() and xp_earned else 0,
+                "total_xp": total_xp_gained if 'total_xp_gained' in locals() else 0,
                 "skills_improved": len(xp_earned) if xp_earned else 0
             })
             
@@ -432,7 +389,8 @@ Only award XP to skills that were clearly practiced based on the journal entries
                 "score": review_content["score"],
                 "xp_earned": xp_earned,
                 "daily_stats": daily_stats,
-                "content": review_content
+                "content": review_content,
+                "next_task_id": task_id
             }
             
         except Exception as api_error:
@@ -443,4 +401,5 @@ Only award XP to skills that were clearly practiced based on the journal entries
         logger.error(f"Error generating daily review for user {user_id}: {str(exc)}")
         self.db.rollback()
         
+        # Retry with exponential backoff
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))

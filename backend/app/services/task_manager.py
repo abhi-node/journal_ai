@@ -185,6 +185,14 @@ class TaskManager:
         try:
             # Cancel any existing scheduled task
             self.cancel_scheduled_review(user_id)
+
+            # Best-effort purge of any other stray scheduled review tasks
+            try:
+                pre_purged = self.purge_user_scheduled_review_tasks(user_id)
+                if pre_purged:
+                    logger.info(f"Pre-schedule purge removed {pre_purged} stray task(s) for user {user_id}")
+            except Exception as purge_err:
+                logger.warning(f"Failed pre-schedule purge for user {user_id}: {purge_err}")
             
             # Calculate next review time
             next_review_utc = self.calculate_next_review_time(
@@ -213,6 +221,14 @@ class TaskManager:
             self.set_scheduled_task(user_id, task_info)
             
             logger.info(f"Scheduled review task {task.id} for user {user_id} at {next_review_utc}")
+
+            # Post-schedule purge: ensure only the new task remains
+            try:
+                post_purged = self.purge_user_scheduled_review_tasks(user_id, keep_task_id=task.id)
+                if post_purged:
+                    logger.info(f"Post-schedule purge removed {post_purged} stray task(s) for user {user_id}")
+            except Exception as purge_err:
+                logger.warning(f"Failed post-schedule purge for user {user_id}: {purge_err}")
             return task.id
             
         except Exception as e:
@@ -292,6 +308,14 @@ class TaskManager:
             
             # Clear stored task info
             self.clear_scheduled_task(user_id)
+            
+            # Best-effort purge of any stray scheduled review tasks for this user
+            try:
+                purged = self.purge_user_scheduled_review_tasks(user_id)
+                if purged:
+                    logger.info(f"Purged {purged} stray scheduled review task(s) for user {user_id}")
+            except Exception as purge_err:
+                logger.warning(f"Failed to purge stray tasks for user {user_id}: {purge_err}")
             return True
             
         except Exception as e:
@@ -353,6 +377,14 @@ class TaskManager:
                 'timezone': user_timezone
             }
             self.set_scheduled_task(user_id, task_info)
+
+            # Best-effort purge of any other scheduled review tasks for this user
+            try:
+                purged = self.purge_user_scheduled_review_tasks(user_id, keep_task_id=task.id)
+                if purged:
+                    logger.info(f"After scheduling, purged {purged} stray task(s) for user {user_id}")
+            except Exception as purge_err:
+                logger.warning(f"Failed to purge stray tasks post-schedule for user {user_id}: {purge_err}")
             
             # Update user record
             user.daily_review_task_id = task.id
@@ -367,6 +399,58 @@ class TaskManager:
             return None
         finally:
             db.close()
+
+    def purge_user_scheduled_review_tasks(self, user_id: UUID, keep_task_id: Optional[str] = None) -> int:
+        """
+        Revoke any scheduled Celery review tasks for a given user that may be
+        lingering in workers' scheduled queues.
+
+        Args:
+            user_id: User's UUID
+            keep_task_id: Optional task id to keep (do not revoke)
+
+        Returns:
+            Count of tasks revoked.
+        """
+        revoked = 0
+        try:
+            insp = celery_app.control.inspect()
+            scheduled = insp.scheduled() or {}
+            target_user = str(user_id)
+            for worker, entries in scheduled.items():
+                if not entries:
+                    continue
+                for entry in entries:
+                    req = entry.get('request', {})
+                    task_id = req.get('id')
+                    task_name = req.get('name') or req.get('type') or req.get('task')
+                    args = req.get('args')
+                    kwargs = req.get('kwargs') or {}
+
+                    if task_name != 'app.tasks.review_tasks.generate_daily_review':
+                        continue
+
+                    # Match user by args or kwargs; args can be list or string
+                    user_match = False
+                    if isinstance(args, (list, tuple)):
+                        user_match = len(args) > 0 and str(args[0]) == target_user
+                    elif isinstance(args, str):
+                        user_match = target_user in args
+                    else:
+                        user_id_kw = kwargs.get('user_id')
+                        if user_id_kw and str(user_id_kw) == target_user:
+                            user_match = True
+
+                    if user_match and task_id and task_id != keep_task_id:
+                        try:
+                            celery_app.control.revoke(task_id, terminate=True)
+                            revoked += 1
+                            logger.info(f"Revoked stray scheduled review task {task_id} for user {user_id} on worker {worker}")
+                        except Exception as e:
+                            logger.warning(f"Failed to revoke task {task_id} on worker {worker}: {e}")
+        except Exception as e:
+            logger.warning(f"Inspector error during purge for user {user_id}: {e}")
+        return revoked
 
 
 # Singleton instance

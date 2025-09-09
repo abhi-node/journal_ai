@@ -45,7 +45,7 @@ What the Workflow Does
 2) terraform apply -target=aws_ecr_repository.backend (ensures ECR repo exists, named automatically as `journalai-dev-backend` unless overridden).
 3) Build and push image to ECR (tags: commit SHA and `dev-latest`) using Terraform output for the repo URL.
 4) terraform apply (creates/updates ECS cluster/service, NLB+TG+listener, API Gateway HTTP API + VPC Link + routes). Names default to `journalai-dev-*` unless overridden.
-5) Prints the API endpoint output.
+5) Prints the API endpoint output (ends with `/prod`).
 
 Local Build/Smoke Test (optional)
 - `docker build -t journalai-backend:dev backend && docker run -p 8000:8000 journalai-backend:dev`

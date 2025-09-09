@@ -16,7 +16,8 @@ resource "aws_apigatewayv2_integration" "nlb_proxy" {
   connection_id          = aws_apigatewayv2_vpc_link.this.id
   integration_method     = "ANY"
   payload_format_version = "1.0"
-  integration_uri        = "http://${aws_lb.nlb.dns_name}"
+  # For HTTP API + VPC Link, integration_uri must be the ALB/NLB listener ARN
+  integration_uri        = aws_lb_listener.http.arn
   timeout_milliseconds   = 30000
 }
 
@@ -39,5 +40,5 @@ resource "aws_apigatewayv2_stage" "prod" {
 }
 
 output "api_gateway_invoke_url" {
-  value = "https://${aws_apigatewayv2_api.http_api.id}.execute-api.${var.aws_region}.amazonaws.com"
+  value = "https://${aws_apigatewayv2_api.http_api.id}.execute-api.${var.aws_region}.amazonaws.com/prod"
 }

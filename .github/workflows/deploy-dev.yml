@@ -23,25 +23,14 @@ env:
   VPC_LINK_NAME: ${{ secrets.VPC_LINK_NAME }}
 
 jobs:
-  deploy:
+  tf-validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
-
-      - name: Terraform Init (remote backend if configured)
+      - name: Terraform Init
         working-directory: infrastructure/terraform
         env:
           TF_BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET }}
@@ -58,41 +47,98 @@ jobs:
           else
             terraform init
           fi
+      - name: Terraform Validate
+        working-directory: infrastructure/terraform
+        run: |
+          terraform fmt -check
+          terraform validate
 
+  tf-ecr:
+    needs: tf-validate
+    runs-on: ubuntu-latest
+    outputs:
+      ecr_repo_url: ${{ steps.ecr-url.outputs.ecr_repo_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+      - name: Terraform Init
+        working-directory: infrastructure/terraform
+        run: terraform init
+      - name: Terraform Import ECR repo if pre-existing (idempotent)
+        working-directory: infrastructure/terraform
+        env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+          TF_VAR_ecr_repository_name: ${{ env.ECR_REPO }}
+        run: |
+          REPO_NAME=${{ env.ECR_REPO }}
+          if [ -z "$REPO_NAME" ]; then REPO_NAME="journalai-dev-backend"; fi
+          terraform import aws_ecr_repository.backend "$REPO_NAME" || true
       - name: Terraform Apply (ECR only)
         working-directory: infrastructure/terraform
         env:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
-          # Placeholders to satisfy required vars during targeted apply
+          TF_VAR_ecr_repository_name: ${{ env.ECR_REPO }}
           TF_VAR_secret_key: placeholder
           TF_VAR_openai_api_key: placeholder
-        run: |
-          terraform apply -auto-approve -target=aws_ecr_repository.backend
-
-      - name: Get ECR repository URL from Terraform output
-        id: tf-outputs
+        run: terraform apply -auto-approve -target=aws_ecr_repository.backend
+      - name: Read ECR repo URL
+        id: ecr-url
         working-directory: infrastructure/terraform
         run: |
-          echo "ECR_REPO_URL=$(terraform output -raw ecr_repository_url)" >> $GITHUB_ENV
+          echo "ecr_repo_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
 
-      - name: Login to Amazon ECR
+  build-push:
+    needs: tf-ecr
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build backend image
+      - name: Build image
         working-directory: backend
         env:
+          ECR_REPO_URL: ${{ needs.tf-ecr.outputs.ecr_repo_url }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker build -f Dockerfile -t $ECR_REPO_URL:$IMAGE_TAG -t $ECR_REPO_URL:dev-latest .
-
-      - name: Push image to ECR
+      - name: Push image
         env:
+          ECR_REPO_URL: ${{ needs.tf-ecr.outputs.ecr_repo_url }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
           docker push $ECR_REPO_URL:$IMAGE_TAG
           docker push $ECR_REPO_URL:dev-latest
 
+  tf-apply:
+    needs: build-push
+    runs-on: ubuntu-latest
+    outputs:
+      api_url: ${{ steps.api-url.outputs.api_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+      - name: Terraform Init
+        working-directory: infrastructure/terraform
+        run: terraform init
       - name: Terraform Apply (full infra)
         working-directory: infrastructure/terraform
         env:
@@ -110,10 +156,25 @@ jobs:
           TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           TF_VAR_database_url: ${{ secrets.DATABASE_URL }}
           TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
-        run: |
-          terraform apply -auto-approve
-
-      - name: Output API endpoint
+        run: terraform apply -auto-approve
+      - name: Read API URL
+        id: api-url
         working-directory: infrastructure/terraform
         run: |
-          terraform output -raw api_gateway_invoke_url || true
+          echo "api_url=$(terraform output -raw api_gateway_invoke_url)" >> $GITHUB_OUTPUT
+
+  smoke-test:
+    needs: tf-apply
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check /health
+        env:
+          URL: ${{ needs.tf-apply.outputs.api_url }}
+        run: |
+          echo "Probing $URL/health"
+          for i in {1..15}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health" || true)
+            if [ "$code" = "200" ]; then echo "OK"; exit 0; fi
+            echo "Attempt $i: got $code, retrying..."; sleep 10;
+          done
+          echo "Health check failed"; exit 1

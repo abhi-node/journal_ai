@@ -97,9 +97,15 @@ jobs:
           TF_VAR_ecr_repository_name: ${{ env.ECR_REPO }}
           TF_INPUT: "false"
         run: |
-          REPO_NAME=${{ env.ECR_REPO }}
-          if [ -z "$REPO_NAME" ]; then REPO_NAME="journalai-dev-backend"; fi
-          terraform import aws_ecr_repository.backend "$REPO_NAME" || true
+          set -euo pipefail
+          REPO_NAME="${{ env.ECR_REPO }}"; if [ -z "${REPO_NAME}" ]; then REPO_NAME="journalai-dev-backend"; fi
+          # If repo exists, import it, otherwise let Terraform create it in the next step
+          if aws ecr describe-repositories --repository-names "$REPO_NAME" >/dev/null 2>&1; then
+            echo "ECR repo $REPO_NAME exists; importing into state"
+            terraform import aws_ecr_repository.backend "$REPO_NAME" || true
+          else
+            echo "ECR repo $REPO_NAME does not exist; Terraform will create it"
+          fi
       - name: Terraform Apply (ECR only)
         working-directory: infrastructure/terraform
         env:
@@ -188,23 +194,111 @@ jobs:
         env:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_INPUT: "false"
-          ECS_TASK_EXEC_ROLE_NAME: ${{ env.project }}-${{ env.environment }}-ecsTaskExecutionRole
-          LOG_GROUP_NAME: /ecs/${{ env.ECS_SERVICE }}
-          DB_SUBNET_GROUP_NAME: ${{ env.project }}-${{ env.environment }}-db-subnets
-          EXISTING_NLB_ARN: ${{ secrets.NLB_ARN }}
-          EXISTING_TG_ARN: ${{ secrets.TG_ARN }}
-          EXISTING_ECS_SG_ID: ${{ secrets.ECS_TASKS_SG_ID }}
-          EXISTING_VPC_LINK_SG_ID: ${{ secrets.VPC_LINK_SG_ID }}
+          PROJECT: journalai
+          ENVIRONMENT: dev
         run: |
-          # Import by name where supported
-          terraform import aws_iam_role.ecs_task_execution_role "journalai-dev-ecsTaskExecutionRole" || true
-          terraform import aws_cloudwatch_log_group.ecs "/ecs/${{ env.ECS_SERVICE || 'journalai-dev-service' }}" || true
-          terraform import aws_db_subnet_group.db "journalai-dev-db-subnets" || true
-          # Import by ID/ARN if secrets provided
-          if [ -n "$EXISTING_NLB_ARN" ]; then terraform import aws_lb.nlb "$EXISTING_NLB_ARN" || true; fi
-          if [ -n "$EXISTING_TG_ARN" ]; then terraform import aws_lb_target_group.backend "$EXISTING_TG_ARN" || true; fi
-          if [ -n "$EXISTING_ECS_SG_ID" ]; then terraform import aws_security_group.ecs_tasks "$EXISTING_ECS_SG_ID" || true; fi
-          if [ -n "$EXISTING_VPC_LINK_SG_ID" ]; then terraform import aws_security_group.vpc_link "$EXISTING_VPC_LINK_SG_ID" || true; fi
+          set -euo pipefail
+          PREFIX="${PROJECT}-${ENVIRONMENT}"
+          # Derive names used by Terraform locals
+          ECR_REPO_NAME="${PREFIX}-backend"
+          ECS_CLUSTER_NAME="${PREFIX}-cluster"
+          ECS_SERVICE_NAME="${PREFIX}-service"
+          LOG_GROUP_NAME="/ecs/${ECS_SERVICE_NAME}"
+          DB_SUBNET_GROUP_NAME="${PREFIX}-db-subnets"
+          NLB_NAME="${PREFIX}-nlb"
+          TG_NAME="${PREFIX}-tg"
+          ROLE_NAME="${PREFIX}-ecsTaskExecutionRole"
+          SG_TASKS_NAME="${PREFIX}-ecs-tasks-sg"
+          SG_VPC_LINK_NAME="${PREFIX}-apigw-vpc-link-sg"
+          SG_RDS_NAME="${PREFIX}-rds-sg"
+          API_NAME="${PREFIX}-http-api"
+          VPC_LINK_NAME="${PREFIX}-vpc-link"
+          DB_INSTANCE_ID="${PREFIX}-db"
+
+          # Helper to get default VPC ID
+          DEFAULT_VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "")
+
+          echo "Importing pre-existing resources where found..."
+
+          # ECR repo by name
+          if aws ecr describe-repositories --repository-names "$ECR_REPO_NAME" >/dev/null 2>&1; then
+            terraform import aws_ecr_repository.backend "$ECR_REPO_NAME" || true
+          fi
+
+          # IAM role by name
+          if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
+            terraform import aws_iam_role.ecs_task_execution_role "$ROLE_NAME" || true
+          fi
+
+          # CloudWatch log group by name
+          if aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP_NAME" --query "logGroups[?logGroupName=='$LOG_GROUP_NAME'] | length(@)" --output text | grep -q '^1$'; then
+            terraform import aws_cloudwatch_log_group.ecs "$LOG_GROUP_NAME" || true
+          fi
+
+          # DB subnet group by name
+          if aws rds describe-db-subnet-groups --db-subnet-group-name "$DB_SUBNET_GROUP_NAME" >/dev/null 2>&1; then
+            terraform import aws_db_subnet_group.db "$DB_SUBNET_GROUP_NAME" || true
+          fi
+
+          # Security groups by name in default VPC
+          if [ -n "$DEFAULT_VPC_ID" ]; then
+            SG_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values="$SG_TASKS_NAME" Name=vpc-id,Values="$DEFAULT_VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
+            if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then terraform import aws_security_group.ecs_tasks "$SG_ID" || true; fi
+
+            SG2_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values="$SG_VPC_LINK_NAME" Name=vpc-id,Values="$DEFAULT_VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
+            if [ -n "$SG2_ID" ] && [ "$SG2_ID" != "None" ]; then terraform import aws_security_group.vpc_link "$SG2_ID" || true; fi
+
+            SGRDS_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values="$SG_RDS_NAME" Name=vpc-id,Values="$DEFAULT_VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
+            if [ -n "$SGRDS_ID" ] && [ "$SGRDS_ID" != "None" ]; then terraform import aws_security_group.rds "$SGRDS_ID" || true; fi
+          fi
+
+          # NLB and target group by name
+          NLB_ARN=$(aws elbv2 describe-load-balancers --names "$NLB_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "")
+          if [ -n "$NLB_ARN" ] && [ "$NLB_ARN" != "None" ]; then
+            terraform import aws_lb.nlb "$NLB_ARN" || true
+            # Listener on port 80
+            LIST_ARN=$(aws elbv2 describe-listeners --load-balancer-arn "$NLB_ARN" --query "Listeners[?Port==\`80\`].ListenerArn | [0]" --output text 2>/dev/null || echo "")
+            if [ -n "$LIST_ARN" ] && [ "$LIST_ARN" != "None" ]; then terraform import aws_lb_listener.http "$LIST_ARN" || true; fi
+          fi
+
+          TG_ARN=$(aws elbv2 describe-target-groups --names "$TG_NAME" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo "")
+          if [ -n "$TG_ARN" ] && [ "$TG_ARN" != "None" ]; then terraform import aws_lb_target_group.backend "$TG_ARN" || true; fi
+
+          # ECS cluster and service
+          ECS_CLUSTER_ARN=$(aws ecs describe-clusters --clusters "$ECS_CLUSTER_NAME" --query 'clusters[0].clusterArn' --output text 2>/dev/null || echo "")
+          if [ -n "$ECS_CLUSTER_ARN" ] && [ "$ECS_CLUSTER_ARN" != "None" ]; then
+            terraform import aws_ecs_cluster.this "$ECS_CLUSTER_ARN" || true
+            ECS_SVC_ARN=$(aws ecs describe-services --cluster "$ECS_CLUSTER_ARN" --services "$ECS_SERVICE_NAME" --query 'services[0].serviceArn' --output text 2>/dev/null || echo "")
+            if [ -n "$ECS_SVC_ARN" ] && [ "$ECS_SVC_ARN" != "None" ]; then
+              terraform import aws_ecs_service.backend "$ECS_CLUSTER_ARN/$ECS_SERVICE_NAME" || true
+            fi
+          fi
+
+          # API Gateway HTTP API + VPC Link stack
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='$API_NAME'].ApiId | [0]" --output text 2>/dev/null || echo "")
+          if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
+            terraform import aws_apigatewayv2_api.http_api "$API_ID" || true
+            # Stage 'prod'
+            terraform import aws_apigatewayv2_stage.prod "$API_ID/prod" || true
+            # VPC Link by name
+            VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='$VPC_LINK_NAME'].VpcLinkId | [0]" --output text 2>/dev/null || echo "")
+            if [ -n "$VPC_LINK_ID" ] && [ "$VPC_LINK_ID" != "None" ]; then terraform import aws_apigatewayv2_vpc_link.this "$VPC_LINK_ID" || true; fi
+            # Integration by listener ARN
+            if [ -n "$LIST_ARN" ] && [ "$LIST_ARN" != "None" ]; then
+              INT_ID=$(aws apigatewayv2 get-integrations --api-id "$API_ID" --query "Items[?IntegrationUri=='$LIST_ARN'].IntegrationId | [0]" --output text 2>/dev/null || echo "")
+              if [ -n "$INT_ID" ] && [ "$INT_ID" != "None" ]; then terraform import aws_apigatewayv2_integration.nlb_proxy "$API_ID/$INT_ID" || true; fi
+            fi
+            # Routes ANY / and ANY /{proxy+}
+            ROOT_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /'].RouteId | [0]" --output text 2>/dev/null || echo "")
+            if [ -n "$ROOT_ROUTE_ID" ] && [ "$ROOT_ROUTE_ID" != "None" ]; then terraform import aws_apigatewayv2_route.root "$API_ID/$ROOT_ROUTE_ID" || true; fi
+            PROXY_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /{proxy+}'].RouteId | [0]" --output text 2>/dev/null || echo "")
+            if [ -n "$PROXY_ROUTE_ID" ] && [ "$PROXY_ROUTE_ID" != "None" ]; then terraform import aws_apigatewayv2_route.proxy "$API_ID/$PROXY_ROUTE_ID" || true; fi
+          fi
+
+          # RDS instance by identifier (optional)
+          if aws rds describe-db-instances --db-instance-identifier "$DB_INSTANCE_ID" >/dev/null 2>&1; then
+            terraform import aws_db_instance.postgres "$DB_INSTANCE_ID" || true
+          fi
       - name: Prepare optional TF vars
         run: |
           # Only set AZ exclusions if provided; otherwise let TF default [] apply

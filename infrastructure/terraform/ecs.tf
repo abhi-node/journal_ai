@@ -4,7 +4,7 @@ resource "aws_ecs_cluster" "this" {
 
 locals {
   repository_url = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${aws_ecr_repository.backend.name}"
-  image_uri      = "${local.repository_url}:${var.image_tag}"
+  image_uri = "${local.repository_url}:${var.image_tag}"
 }
 
 resource "aws_ecs_task_definition" "backend" {
@@ -26,12 +26,12 @@ resource "aws_ecs_task_definition" "backend" {
       }]
       command = ["sh", "-c", "alembic -c alembic.ini upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"]
       environment = [
-        { name = "ENVIRONMENT",     value = var.environment },
-        { name = "SECRET_KEY",      value = var.secret_key },
-        { name = "OPENAI_API_KEY",  value = var.openai_api_key },
-        { name = "DATABASE_URL",    value = var.database_url },
-        { name = "REDIS_URL",       value = var.redis_url },
-        { name = "PYTHONPATH",      value = "/app" }
+        { name = "ENVIRONMENT", value = var.environment },
+        { name = "SECRET_KEY", value = var.secret_key },
+        { name = "OPENAI_API_KEY", value = var.openai_api_key },
+        { name = "DATABASE_URL", value = var.database_url },
+        { name = "REDIS_URL", value = var.redis_url },
+        { name = "PYTHONPATH", value = "/app" }
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -54,9 +54,9 @@ resource "aws_ecs_task_definition" "backend" {
       image     = "postgres:15-alpine"
       essential = true
       environment = [
-        { name = "POSTGRES_USER",     value = "journalai" },
+        { name = "POSTGRES_USER", value = "journalai" },
         { name = "POSTGRES_PASSWORD", value = "journalai" },
-        { name = "POSTGRES_DB",       value = "journalai" }
+        { name = "POSTGRES_DB", value = "journalai" }
       ]
       portMappings = [{ containerPort = 5432, protocol = "tcp" }]
       healthCheck = {
@@ -100,12 +100,12 @@ resource "aws_ecs_task_definition" "backend" {
       essential = false
       command   = ["sh", "-c", "celery -A app.core.celery_app worker --loglevel=info --concurrency=1"]
       environment = [
-        { name = "ENVIRONMENT",     value = var.environment },
-        { name = "SECRET_KEY",      value = var.secret_key },
-        { name = "OPENAI_API_KEY",  value = var.openai_api_key },
-        { name = "DATABASE_URL",    value = var.database_url },
-        { name = "REDIS_URL",       value = var.redis_url },
-        { name = "PYTHONPATH",      value = "/app" }
+        { name = "ENVIRONMENT", value = var.environment },
+        { name = "SECRET_KEY", value = var.secret_key },
+        { name = "OPENAI_API_KEY", value = var.openai_api_key },
+        { name = "DATABASE_URL", value = var.database_url },
+        { name = "REDIS_URL", value = var.redis_url },
+        { name = "PYTHONPATH", value = "/app" }
       ]
       logConfiguration = {
         logDriver = "awslogs"
@@ -126,12 +126,12 @@ resource "aws_ecs_task_definition" "backend" {
       essential = false
       command   = ["sh", "-c", "celery -A app.core.celery_app beat --loglevel=info"]
       environment = [
-        { name = "ENVIRONMENT",     value = var.environment },
-        { name = "SECRET_KEY",      value = var.secret_key },
-        { name = "OPENAI_API_KEY",  value = var.openai_api_key },
-        { name = "DATABASE_URL",    value = var.database_url },
-        { name = "REDIS_URL",       value = var.redis_url },
-        { name = "PYTHONPATH",      value = "/app" }
+        { name = "ENVIRONMENT", value = var.environment },
+        { name = "SECRET_KEY", value = var.secret_key },
+        { name = "OPENAI_API_KEY", value = var.openai_api_key },
+        { name = "DATABASE_URL", value = var.database_url },
+        { name = "REDIS_URL", value = var.redis_url },
+        { name = "PYTHONPATH", value = "/app" }
       ]
       logConfiguration = {
         logDriver = "awslogs"

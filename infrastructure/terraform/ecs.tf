@@ -7,6 +7,7 @@ locals {
   image_uri         = "${local.repository_url}:${var.image_tag}"
   database_password = var.db_password != "" ? var.db_password : random_password.db.result
   database_url      = "postgresql://${var.db_username}:${local.database_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
+  redis_url         = var.redis_url != "" ? var.redis_url : "redis://127.0.0.1:6379/0"
 }
 
 resource "aws_ecs_task_definition" "backend" {
@@ -52,7 +53,7 @@ resource "aws_ecs_task_definition" "backend" {
         },
         {
           name  = "REDIS_URL"
-          value = var.redis_url
+          value = local.redis_url
         },
         {
           name  = "PYTHONPATH"
@@ -74,6 +75,12 @@ resource "aws_ecs_task_definition" "backend" {
         retries     = 3
         startPeriod = 40
       }
+      dependsOn = [
+        {
+          containerName = "redis"
+          condition     = "START"
+        }
+      ]
     },
     {
       name      = "redis"
@@ -120,11 +127,11 @@ resource "aws_ecs_task_definition" "backend" {
         },
         {
           name  = "DATABASE_URL"
-          value = var.database_url
+          value = local.database_url
         },
         {
           name  = "REDIS_URL"
-          value = var.redis_url
+          value = local.redis_url
         },
         {
           name  = "PYTHONPATH"

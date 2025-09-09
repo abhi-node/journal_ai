@@ -306,6 +306,9 @@ jobs:
           # Only set AZ exclusions if provided; otherwise let TF default [] apply
           VAL='${{ secrets.VPC_LINK_EXCLUDED_AZ_IDS }}'
           if [ -n "$VAL" ]; then echo "TF_VAR_apigw_excluded_az_ids=$VAL" >> $GITHUB_ENV; fi
+          # Only set redis_url if provided; otherwise let TF use safe default
+          RVAL='${{ secrets.REDIS_URL }}'
+          if [ -n "$RVAL" ]; then echo "TF_VAR_redis_url=$RVAL" >> $GITHUB_ENV; fi
       - name: Terraform Apply (full infra)
         working-directory: infrastructure/terraform
         env:
@@ -322,7 +325,6 @@ jobs:
           TF_VAR_vpc_link_name: ${{ env.VPC_LINK_NAME }}
           TF_VAR_secret_key: ${{ secrets.SECRET_KEY }}
           TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
-          TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
         run: terraform apply -auto-approve
       - name: Read API URL

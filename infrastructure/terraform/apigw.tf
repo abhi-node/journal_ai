@@ -56,8 +56,15 @@ data "aws_subnet" "default_subnets" {
 }
 
 locals {
+  # If the caller did not provide excluded AZ IDs, apply a sane default for us-east-1
+  # where API Gateway VPC Link commonly does not support use1-az3. Callers can override
+  # via var.apigw_excluded_az_ids.
+  apigw_excluded_az_ids_effective = length(var.apigw_excluded_az_ids) > 0 ? var.apigw_excluded_az_ids : (
+    var.aws_region == "us-east-1" ? ["use1-az3"] : []
+  )
+
   vpc_link_subnets = [
     for s in data.aws_subnet.default_subnets : s.id
-    if length(var.apigw_excluded_az_ids) == 0 || !contains(var.apigw_excluded_az_ids, s.availability_zone_id)
+    if length(local.apigw_excluded_az_ids_effective) == 0 || !contains(local.apigw_excluded_az_ids_effective, s.availability_zone_id)
   ]
 }

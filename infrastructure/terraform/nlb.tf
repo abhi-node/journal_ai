@@ -1,8 +1,8 @@
 resource "aws_lb" "nlb" {
-  name               = local.nlb_name
-  load_balancer_type = "network"
-  internal           = false
-  subnets            = local.vpc_link_subnets
+  name                             = local.nlb_name
+  load_balancer_type               = "network"
+  internal                         = false
+  subnets                          = local.vpc_link_subnets
   enable_cross_zone_load_balancing = true
 }
 

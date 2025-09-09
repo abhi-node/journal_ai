@@ -1,11 +1,11 @@
 resource "aws_apigatewayv2_api" "http_api" {
-  name          = local.api_name
+  name = local.api_name
   protocol_type = "HTTP"
 }
 
 resource "aws_apigatewayv2_vpc_link" "this" {
-  name               = local.vpc_link_name
-  subnet_ids         = data.aws_subnets.default.ids
+  name = local.vpc_link_name
+  subnet_ids = data.aws_subnets.default.ids
   security_group_ids = [aws_security_group.vpc_link.id]
 }
 

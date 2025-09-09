@@ -88,3 +88,47 @@ variable "redis_url" {
   type        = string
   default     = "redis://127.0.0.1:6379/0"
 }
+
+# RDS Postgres configuration
+variable "db_name" {
+  description = "Postgres database name"
+  type        = string
+  default     = "journalai"
+}
+
+variable "db_username" {
+  description = "Postgres master username"
+  type        = string
+  default     = "journalai"
+}
+
+variable "db_password" {
+  description = "Postgres master password (leave empty to auto-generate)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "db_instance_class" {
+  description = "RDS instance class"
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "db_engine_version" {
+  description = "Postgres engine version"
+  type        = string
+  default     = "15.7"
+}
+
+variable "db_allocated_storage" {
+  description = "Allocated storage (GB)"
+  type        = number
+  default     = 20
+}
+
+variable "db_publicly_accessible" {
+  description = "Whether RDS instance is publicly accessible"
+  type        = bool
+  default     = true
+}

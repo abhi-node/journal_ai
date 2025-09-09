@@ -6,13 +6,15 @@ Overview
 
 Key Resources
 - ECR repository: stores the container image.
-- ECS Fargate service: runs your FastAPI container (1 task). Public IP enabled for simple outbound internet to OpenAI.
+- ECS Fargate service: runs your containers (backend, redis, celery worker, celery beat) in a single task. Public IP enabled for simple outbound internet to OpenAI.
+- Amazon RDS for PostgreSQL: cheapest viable instance for persistent DB.
 - Network Load Balancer: internet‑facing TCP:80 to target group port 8000.
 - API Gateway HTTP API: public HTTPS endpoint with VPC Link integration to the NLB.
 
 Important Notes
-- Database/Redis/Celery: The ECS task includes Postgres and Redis containers alongside the API, plus Celery worker and beat. This keeps everything in a single cheap task for beta. Data is ephemeral (task restarts will wipe Postgres data). When ready, move DB to RDS and Redis to ElastiCache, and split workers.
-- Security groups: Tasks allow inbound 8000 from the VPC CIDR (so NLB can reach them). Tasks get a public IP for outbound to the internet.
+- Database: Now uses Amazon RDS Postgres (persistent). No Postgres container runs in ECS.
+- Redis/Celery: Redis remains an in‑task container for simplicity; Celery worker and beat run as separate containers in the same task.
+- Security groups: Tasks allow inbound 8000 from the VPC CIDR (so NLB can reach them). RDS allows inbound 5432 only from the ECS tasks security group.
 
 Required GitHub Secrets (used by Terraform via TF_VAR_*)
  - Minimal required to run:
@@ -22,12 +24,13 @@ Required GitHub Secrets (used by Terraform via TF_VAR_*)
    - `OPENAI_API_KEY`
  - Optional (override default names, otherwise they auto‑generate as `journalai-dev-*`):
    - `ECR_REPO`, `ECS_CLUSTER`, `ECS_SERVICE`, `API_NAME`, `NLB_NAME`, `TG_NAME`, `VPC_LINK_NAME`
- - App envs passed to the container (adjust as needed; sensible defaults already set):
-  - `ENVIRONMENT` (e.g., `development`)
-  - `SECRET_KEY`
-  - `OPENAI_API_KEY`
-  - `DATABASE_URL` (defaults to in‑task Postgres: `postgresql://journalai:journalai@127.0.0.1:5432/journalai`)
-  - `REDIS_URL` (defaults to `redis://127.0.0.1:6379/0`)
+ - Optional DB overrides (Terraform has sensible defaults and can auto‑generate a password):
+   - `DB_PASSWORD` (if unset, Terraform generates one and stores it in state)
+ - App envs passed to the containers (Terraform computes `DATABASE_URL` from RDS):
+   - `ENVIRONMENT` (e.g., `development`)
+   - `SECRET_KEY`
+   - `OPENAI_API_KEY`
+   - `REDIS_URL` (defaults to `redis://127.0.0.1:6379/0`)
 
 Optional: Remote Terraform backend
 - If you have an S3 bucket + DynamoDB table for state/locking, set these secrets to use a remote backend during `terraform init`:
@@ -44,7 +47,7 @@ What the Workflow Does
 1) terraform init (optionally using an S3 backend if configured by secrets).
 2) terraform apply -target=aws_ecr_repository.backend (ensures ECR repo exists, named automatically as `journalai-dev-backend` unless overridden).
 3) Build and push image to ECR (tags: commit SHA and `dev-latest`) using Terraform output for the repo URL.
-4) terraform apply (creates/updates ECS cluster/service, NLB+TG+listener, API Gateway HTTP API + VPC Link + routes). Names default to `journalai-dev-*` unless overridden.
+4) terraform apply (creates/updates RDS Postgres, ECS cluster/service with backend/redis/worker/beat, NLB+TG+listener, API Gateway HTTP API + VPC Link + routes). Names default to `journalai-dev-*` unless overridden.
 5) Prints the API endpoint output (ends with `/prod`).
 
 Local Build/Smoke Test (optional)

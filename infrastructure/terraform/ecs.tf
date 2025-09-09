@@ -3,8 +3,10 @@ resource "aws_ecs_cluster" "this" {
 }
 
 locals {
-  repository_url = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${aws_ecr_repository.backend.name}"
-  image_uri      = "${local.repository_url}:${var.image_tag}"
+  repository_url    = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com/${aws_ecr_repository.backend.name}"
+  image_uri         = "${local.repository_url}:${var.image_tag}"
+  database_password = var.db_password != "" ? var.db_password : random_password.db.result
+  database_url      = "postgresql://${var.db_username}:${local.database_password}@${aws_db_instance.postgres.address}:5432/${var.db_name}"
 }
 
 resource "aws_ecs_task_definition" "backend" {
@@ -46,7 +48,7 @@ resource "aws_ecs_task_definition" "backend" {
         },
         {
           name  = "DATABASE_URL"
-          value = var.database_url
+          value = local.database_url
         },
         {
           name  = "REDIS_URL"
@@ -71,45 +73,6 @@ resource "aws_ecs_task_definition" "backend" {
         timeout     = 5
         retries     = 3
         startPeriod = 40
-      }
-    },
-    {
-      name      = "postgres"
-      image     = "postgres:15-alpine"
-      essential = true
-      environment = [
-        {
-          name  = "POSTGRES_USER"
-          value = "journalai"
-        },
-        {
-          name  = "POSTGRES_PASSWORD"
-          value = "journalai"
-        },
-        {
-          name  = "POSTGRES_DB"
-          value = "journalai"
-        }
-      ]
-      portMappings = [
-        {
-          containerPort = 5432
-          protocol      = "tcp"
-        }
-      ]
-      healthCheck = {
-        command  = ["CMD-SHELL", "pg_isready -U journalai -h 127.0.0.1"]
-        interval = 30
-        timeout  = 5
-        retries  = 3
-      }
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          awslogs-group         = aws_cloudwatch_log_group.ecs.name
-          awslogs-region        = var.aws_region
-          awslogs-stream-prefix = "ecs"
-        }
       }
     },
     {
@@ -180,10 +143,6 @@ resource "aws_ecs_task_definition" "backend" {
         {
           containerName = "redis"
           condition     = "START"
-        },
-        {
-          containerName = "postgres"
-          condition     = "START"
         }
       ]
     },
@@ -207,7 +166,7 @@ resource "aws_ecs_task_definition" "backend" {
         },
         {
           name  = "DATABASE_URL"
-          value = var.database_url
+          value = local.database_url
         },
         {
           name  = "REDIS_URL"

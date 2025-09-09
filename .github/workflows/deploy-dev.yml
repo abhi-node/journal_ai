@@ -1,0 +1,116 @@
+name: Deploy Dev (ECS + NLB + API GW via Terraform)
+
+on:
+  push:
+    branches: [ "dev" ]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-dev.yml'
+      - 'infrastructure/**'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  ECR_REPO: ${{ secrets.ECR_REPO }}
+  ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
+  ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
+  API_NAME: ${{ secrets.API_NAME }}
+  NLB_NAME: ${{ secrets.NLB_NAME }}
+  TG_NAME: ${{ secrets.TG_NAME }}
+  VPC_LINK_NAME: ${{ secrets.VPC_LINK_NAME }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+
+      - name: Terraform Init (remote backend if configured)
+        working-directory: infrastructure/terraform
+        env:
+          TF_BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET }}
+          TF_BACKEND_DYNAMODB_TABLE: ${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}
+          TF_BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION }}
+          TF_BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY }}
+        run: |
+          if [ -n "${TF_BACKEND_BUCKET}" ] && [ -n "${TF_BACKEND_KEY}" ] && [ -n "${TF_BACKEND_REGION}" ]; then
+            terraform init \
+              -backend-config="bucket=${TF_BACKEND_BUCKET}" \
+              -backend-config="key=${TF_BACKEND_KEY}" \
+              -backend-config="region=${TF_BACKEND_REGION}" \
+              -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}"
+          else
+            terraform init
+          fi
+
+      - name: Terraform Apply (ECR only)
+        working-directory: infrastructure/terraform
+        env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+        run: |
+          terraform apply -auto-approve -target=aws_ecr_repository.backend
+
+      - name: Get ECR repository URL from Terraform output
+        id: tf-outputs
+        working-directory: infrastructure/terraform
+        run: |
+          echo "ECR_REPO_URL=$(terraform output -raw ecr_repository_url)" >> $GITHUB_ENV
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build backend image
+        working-directory: backend
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -f Dockerfile -t $ECR_REPO_URL:$IMAGE_TAG -t $ECR_REPO_URL:dev-latest .
+
+      - name: Push image to ECR
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker push $ECR_REPO_URL:$IMAGE_TAG
+          docker push $ECR_REPO_URL:dev-latest
+
+      - name: Terraform Apply (full infra)
+        working-directory: infrastructure/terraform
+        env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+          TF_VAR_project: journalai
+          TF_VAR_environment: dev
+          TF_VAR_image_tag: dev-latest
+          TF_VAR_ecs_cluster_name: ${{ env.ECS_CLUSTER }}
+          TF_VAR_ecs_service_name: ${{ env.ECS_SERVICE }}
+          TF_VAR_api_name: ${{ env.API_NAME }}
+          TF_VAR_nlb_name: ${{ env.NLB_NAME }}
+          TF_VAR_tg_name: ${{ env.TG_NAME }}
+          TF_VAR_vpc_link_name: ${{ env.VPC_LINK_NAME }}
+          TF_VAR_secret_key: ${{ secrets.SECRET_KEY }}
+          TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          TF_VAR_database_url: ${{ secrets.DATABASE_URL }}
+          TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
+        run: |
+          terraform apply -auto-approve
+
+      - name: Output API endpoint
+        working-directory: infrastructure/terraform
+        run: |
+          terraform output -raw api_gateway_invoke_url || true

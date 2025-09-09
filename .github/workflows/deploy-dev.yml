@@ -63,6 +63,9 @@ jobs:
         working-directory: infrastructure/terraform
         env:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
+          # Placeholders to satisfy required vars during targeted apply
+          TF_VAR_secret_key: placeholder
+          TF_VAR_openai_api_key: placeholder
         run: |
           terraform apply -auto-approve -target=aws_ecr_repository.backend
 

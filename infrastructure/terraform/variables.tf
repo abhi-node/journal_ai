@@ -67,12 +67,14 @@ variable "secret_key" {
   description = "App SECRET_KEY"
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 variable "openai_api_key" {
   description = "OpenAI API Key"
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 variable "database_url" {

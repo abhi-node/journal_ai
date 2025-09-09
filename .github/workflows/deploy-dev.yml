@@ -171,6 +171,7 @@ jobs:
           TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_apigw_excluded_az_ids: ${{ secrets.VPC_LINK_EXCLUDED_AZ_IDS }}
         run: terraform apply -auto-approve
       - name: Read API URL
         id: api-url

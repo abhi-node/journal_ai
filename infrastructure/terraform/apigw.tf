@@ -5,8 +5,14 @@ resource "aws_apigatewayv2_api" "http_api" {
 
 resource "aws_apigatewayv2_vpc_link" "this" {
   name               = local.vpc_link_name
-  subnet_ids         = data.aws_subnets.default.ids
+  subnet_ids         = local.vpc_link_subnets
   security_group_ids = [aws_security_group.vpc_link.id]
+  lifecycle {
+    precondition {
+      condition     = length(local.vpc_link_subnets) >= 2
+      error_message = "VPC Link requires at least two subnets; adjust apigw_excluded_az_ids to include only supported AZ IDs."
+    }
+  }
 }
 
 resource "aws_apigatewayv2_integration" "nlb_proxy" {
@@ -41,4 +47,17 @@ resource "aws_apigatewayv2_stage" "prod" {
 
 output "api_gateway_invoke_url" {
   value = "https://${aws_apigatewayv2_api.http_api.id}.execute-api.${var.aws_region}.amazonaws.com/prod"
+}
+
+# Build filtered subnet list for VPC Link (exclude unsupported AZ IDs if provided)
+data "aws_subnet" "default_subnets" {
+  for_each = toset(data.aws_subnets.default.ids)
+  id       = each.value
+}
+
+locals {
+  vpc_link_subnets = [
+    for s in data.aws_subnet.default_subnets : s.id
+    if length(var.apigw_excluded_az_ids) == 0 || !contains(var.apigw_excluded_az_ids, s.availability_zone_id)
+  ]
 }

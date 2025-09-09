@@ -132,3 +132,9 @@ variable "db_publicly_accessible" {
   type        = bool
   default     = true
 }
+
+variable "apigw_excluded_az_ids" {
+  description = "List of AZ IDs to exclude from API Gateway VPC Link subnets (e.g., [\"use1-az3\"])"
+  type        = list(string)
+  default     = []
+}

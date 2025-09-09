@@ -75,12 +75,27 @@ jobs:
           terraform_version: 1.6.6
       - name: Terraform Init
         working-directory: infrastructure/terraform
-        run: terraform init
+        env:
+          TF_BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET }}
+          TF_BACKEND_DYNAMODB_TABLE: ${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}
+          TF_BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION }}
+          TF_BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY }}
+        run: |
+          if [ -n "${TF_BACKEND_BUCKET}" ] && [ -n "${TF_BACKEND_KEY}" ] && [ -n "${TF_BACKEND_REGION}" ]; then
+            terraform init \
+              -backend-config="bucket=${TF_BACKEND_BUCKET}" \
+              -backend-config="key=${TF_BACKEND_KEY}" \
+              -backend-config="region=${TF_BACKEND_REGION}" \
+              -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}"
+          else
+            terraform init
+          fi
       - name: Terraform Import ECR repo if pre-existing (idempotent)
         working-directory: infrastructure/terraform
         env:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_ecr_repository_name: ${{ env.ECR_REPO }}
+          TF_INPUT: "false"
         run: |
           REPO_NAME=${{ env.ECR_REPO }}
           if [ -z "$REPO_NAME" ]; then REPO_NAME="journalai-dev-backend"; fi
@@ -153,10 +168,26 @@ jobs:
           terraform_version: 1.6.6
       - name: Terraform Init
         working-directory: infrastructure/terraform
-        run: terraform init
+        env:
+          TF_BACKEND_BUCKET: ${{ secrets.TF_BACKEND_BUCKET }}
+          TF_BACKEND_DYNAMODB_TABLE: ${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}
+          TF_BACKEND_REGION: ${{ secrets.TF_BACKEND_REGION }}
+          TF_BACKEND_KEY: ${{ secrets.TF_BACKEND_KEY }}
+        run: |
+          if [ -n "${TF_BACKEND_BUCKET}" ] && [ -n "${TF_BACKEND_KEY}" ] && [ -n "${TF_BACKEND_REGION}" ]; then
+            terraform init \
+              -backend-config="bucket=${TF_BACKEND_BUCKET}" \
+              -backend-config="key=${TF_BACKEND_KEY}" \
+              -backend-config="region=${TF_BACKEND_REGION}" \
+              -backend-config="dynamodb_table=${TF_BACKEND_DYNAMODB_TABLE}"
+          else
+            terraform init
+          fi
       - name: Import pre-existing infra (optional, idempotent)
         working-directory: infrastructure/terraform
         env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+          TF_INPUT: "false"
           ECS_TASK_EXEC_ROLE_NAME: ${{ env.project }}-${{ env.environment }}-ecsTaskExecutionRole
           LOG_GROUP_NAME: /ecs/${{ env.ECS_SERVICE }}
           DB_SUBNET_GROUP_NAME: ${{ env.project }}-${{ env.environment }}-db-subnets
@@ -182,6 +213,7 @@ jobs:
       - name: Terraform Apply (full infra)
         working-directory: infrastructure/terraform
         env:
+          TF_INPUT: "false"
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_project: journalai
           TF_VAR_environment: dev

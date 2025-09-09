@@ -22,20 +22,20 @@ resource "aws_apigatewayv2_integration" "nlb_proxy" {
 }
 
 resource "aws_apigatewayv2_route" "root" {
-  api_id    = aws_apigatewayv2_api.http_api.id
+  api_id = aws_apigatewayv2_api.http_api.id
   route_key = "ANY /"
-  target    = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
+  target = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
 }
 
 resource "aws_apigatewayv2_route" "proxy" {
-  api_id    = aws_apigatewayv2_api.http_api.id
+  api_id = aws_apigatewayv2_api.http_api.id
   route_key = "ANY /{proxy+}"
-  target    = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
+  target = "integrations/${aws_apigatewayv2_integration.nlb_proxy.id}"
 }
 
 resource "aws_apigatewayv2_stage" "prod" {
-  api_id      = aws_apigatewayv2_api.http_api.id
-  name        = "prod"
+  api_id = aws_apigatewayv2_api.http_api.id
+  name = "prod"
   auto_deploy = true
 }
 

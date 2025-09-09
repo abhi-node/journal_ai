@@ -154,6 +154,26 @@ jobs:
       - name: Terraform Init
         working-directory: infrastructure/terraform
         run: terraform init
+      - name: Import pre-existing infra (optional, idempotent)
+        working-directory: infrastructure/terraform
+        env:
+          ECS_TASK_EXEC_ROLE_NAME: ${{ env.project }}-${{ env.environment }}-ecsTaskExecutionRole
+          LOG_GROUP_NAME: /ecs/${{ env.ECS_SERVICE }}
+          DB_SUBNET_GROUP_NAME: ${{ env.project }}-${{ env.environment }}-db-subnets
+          EXISTING_NLB_ARN: ${{ secrets.NLB_ARN }}
+          EXISTING_TG_ARN: ${{ secrets.TG_ARN }}
+          EXISTING_ECS_SG_ID: ${{ secrets.ECS_TASKS_SG_ID }}
+          EXISTING_VPC_LINK_SG_ID: ${{ secrets.VPC_LINK_SG_ID }}
+        run: |
+          # Import by name where supported
+          terraform import aws_iam_role.ecs_task_execution_role "journalai-dev-ecsTaskExecutionRole" || true
+          terraform import aws_cloudwatch_log_group.ecs "/ecs/${{ env.ECS_SERVICE || 'journalai-dev-service' }}" || true
+          terraform import aws_db_subnet_group.db "journalai-dev-db-subnets" || true
+          # Import by ID/ARN if secrets provided
+          if [ -n "$EXISTING_NLB_ARN" ]; then terraform import aws_lb.nlb "$EXISTING_NLB_ARN" || true; fi
+          if [ -n "$EXISTING_TG_ARN" ]; then terraform import aws_lb_target_group.backend "$EXISTING_TG_ARN" || true; fi
+          if [ -n "$EXISTING_ECS_SG_ID" ]; then terraform import aws_security_group.ecs_tasks "$EXISTING_ECS_SG_ID" || true; fi
+          if [ -n "$EXISTING_VPC_LINK_SG_ID" ]; then terraform import aws_security_group.vpc_link "$EXISTING_VPC_LINK_SG_ID" || true; fi
       - name: Prepare optional TF vars
         run: |
           # Only set AZ exclusions if provided; otherwise let TF default [] apply

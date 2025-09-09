@@ -10,15 +10,15 @@ resource "aws_apigatewayv2_vpc_link" "this" {
 }
 
 resource "aws_apigatewayv2_integration" "nlb_proxy" {
-  api_id                 = aws_apigatewayv2_api.http_api.id
-  integration_type       = "HTTP_PROXY"
-  connection_type        = "VPC_LINK"
-  connection_id          = aws_apigatewayv2_vpc_link.this.id
-  integration_method     = "ANY"
+  api_id = aws_apigatewayv2_api.http_api.id
+  integration_type = "HTTP_PROXY"
+  connection_type = "VPC_LINK"
+  connection_id = aws_apigatewayv2_vpc_link.this.id
+  integration_method = "ANY"
   payload_format_version = "1.0"
   # For HTTP API + VPC Link, integration_uri must be the ALB/NLB listener ARN
-  integration_uri        = aws_lb_listener.http.arn
-  timeout_milliseconds   = 30000
+  integration_uri = aws_lb_listener.http.arn
+  timeout_milliseconds = 30000
 }
 
 resource "aws_apigatewayv2_route" "root" {

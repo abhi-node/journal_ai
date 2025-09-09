@@ -214,7 +214,7 @@ resource "aws_ecs_service" "backend" {
   launch_type     = "FARGATE"
 
   network_configuration {
-    subnets          = data.aws_subnets.default.ids
+    subnets          = local.vpc_link_subnets
     security_groups  = [aws_security_group.ecs_tasks.id]
     assign_public_ip = true
   }

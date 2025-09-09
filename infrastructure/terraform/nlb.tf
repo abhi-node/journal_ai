@@ -2,7 +2,8 @@ resource "aws_lb" "nlb" {
   name               = local.nlb_name
   load_balancer_type = "network"
   internal           = false
-  subnets            = data.aws_subnets.default.ids
+  subnets            = local.vpc_link_subnets
+  enable_cross_zone_load_balancing = true
 }
 
 resource "aws_lb_target_group" "backend" {

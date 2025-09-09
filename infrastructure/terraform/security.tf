@@ -11,7 +11,7 @@ resource "aws_security_group" "ecs_tasks" {
   }
 
   ingress {
-    description = "Allow NLB -> backend port"
+    description = "Allow NLB to backend port 8000"
     from_port   = 8000
     to_port     = 8000
     protocol    = "tcp"

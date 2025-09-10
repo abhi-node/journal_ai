@@ -1,23 +1,25 @@
-# Service Discovery namespace
-# This will either be created new or use existing (via import)
+# Service Discovery - Create or use existing
+data "aws_service_discovery_http_namespace" "existing" {
+  count = var.use_existing_namespace ? 1 : 0
+  name  = "${var.project}-${var.environment}.local"
+}
+
 resource "aws_service_discovery_private_dns_namespace" "this" {
+  count       = var.use_existing_namespace ? 0 : 1
   name        = "${var.project}-${var.environment}.local"
   description = "Private namespace for ${var.project} ${var.environment}"
   vpc         = data.aws_vpc.default.id
-
-  # If namespace already exists with different settings, ignore changes
-  lifecycle {
-    ignore_changes = [description]
-  }
 }
 
-# Service Discovery service
-# This will either be created new or use existing (via import)
+locals {
+  namespace_id = var.use_existing_namespace ? data.aws_service_discovery_http_namespace.existing[0].id : aws_service_discovery_private_dns_namespace.this[0].id
+}
+
 resource "aws_service_discovery_service" "backend" {
   name = "backend"
 
   dns_config {
-    namespace_id = aws_service_discovery_private_dns_namespace.this.id
+    namespace_id = local.namespace_id
 
     dns_records {
       ttl  = 10
@@ -27,13 +29,11 @@ resource "aws_service_discovery_service" "backend" {
     routing_policy = "MULTIVALUE"
   }
 
-  health_check_custom_config {
-    # failure_threshold is deprecated and always set to 1 by AWS
-  }
-
-  # If service already exists, don't recreate
+  # Don't specify health_check_custom_config at all for ECS-managed services
+  # ECS handles health checks automatically
+  
   lifecycle {
-    create_before_destroy = false
+    create_before_destroy = true
   }
 }
 

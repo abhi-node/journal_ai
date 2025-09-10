@@ -1,6 +1,11 @@
 terraform {
   required_version = ">= 1.5.0"
 
+  # Backend configuration - values provided via CLI flags
+  backend "s3" {
+    # bucket, key, region, and dynamodb_table are provided via -backend-config flags
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"

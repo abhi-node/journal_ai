@@ -19,7 +19,46 @@ env:
   ENVIRONMENT: dev
 
 jobs:
+  # TEMPORARY: Remove this job after first run
+  destroy-infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+      
+      - name: Terraform Destroy All
+        working-directory: infrastructure/terraform
+        env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+          TF_VAR_project: ${{ env.PROJECT }}
+          TF_VAR_environment: ${{ env.ENVIRONMENT }}
+          TF_VAR_image_tag: dev-latest
+          TF_VAR_secret_key: placeholder
+          TF_VAR_openai_api_key: placeholder
+          TF_VAR_db_password: placeholder
+          TF_INPUT: "false"
+        run: |
+          # Initialize Terraform
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
+            -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
+            -backend-config="region=${{ secrets.TF_BACKEND_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
+          
+          # Destroy all resources managed by Terraform
+          terraform destroy -auto-approve
+  
   build-and-deploy:
+    needs: destroy-infrastructure  # Remove this dependency after first run
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -63,25 +102,80 @@ jobs:
           TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
           TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
-          TF_VAR_use_existing_namespace: true
           TF_INPUT: "false"
         run: |
-          # Initialize Terraform with backend config
+          # Initialize Terraform
           terraform init \
             -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
             -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
             -backend-config="region=${{ secrets.TF_BACKEND_REGION }}" \
             -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
           
-          # Format check
-          terraform fmt -check || true
+          # Import existing resources using our naming convention
+          # These commands will fail silently if resources don't exist or are already imported
+          
+          # Get VPC ID for imports that need it
+          VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
+          
+          # Service Discovery
+          NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='journalai-dev.local'].Id | [0]" --output text 2>/dev/null || echo "")
+          if [ -n "$NAMESPACE_ID" ] && [ "$NAMESPACE_ID" != "None" ]; then
+            terraform import aws_service_discovery_private_dns_namespace.this "${NAMESPACE_ID}:${VPC_ID}" || true
+            SERVICE_ID=$(aws servicediscovery list-services --filters "Name=NAMESPACE_ID,Values=$NAMESPACE_ID" --query "Services[?Name=='backend'].Id | [0]" --output text 2>/dev/null || echo "")
+            [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "None" ] && terraform import aws_service_discovery_service.backend "$SERVICE_ID" || true
+          fi
+          
+          # ECR Repository
+          terraform import aws_ecr_repository.backend journalai-dev-backend || true
+          
+          # ECS Resources
+          terraform import aws_ecs_cluster.this journalai-dev-cluster || true
+          terraform import aws_ecs_service.backend journalai-dev-cluster/journalai-dev-service || true
+          
+          # CloudWatch Logs
+          terraform import aws_cloudwatch_log_group.ecs /ecs/journalai-dev-service || true
+          
+          # IAM Role
+          terraform import aws_iam_role.ecs_task_execution_role journalai-dev-ecsTaskExecutionRole || true
+          
+          # RDS Resources
+          terraform import aws_db_instance.postgres journalai-dev-db || true
+          terraform import aws_db_subnet_group.db journalai-dev-db-subnets || true
+          
+          # Security Groups
+          SG_ECS=$(aws ec2 describe-security-groups --filters Name=group-name,Values=journalai-dev-ecs-tasks-sg Name=vpc-id,Values="$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
+          [ -n "$SG_ECS" ] && [ "$SG_ECS" != "None" ] && terraform import aws_security_group.ecs_tasks "$SG_ECS" || true
+          
+          SG_VPC_LINK=$(aws ec2 describe-security-groups --filters Name=group-name,Values=journalai-dev-apigw-vpc-link-sg Name=vpc-id,Values="$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
+          [ -n "$SG_VPC_LINK" ] && [ "$SG_VPC_LINK" != "None" ] && terraform import aws_security_group.vpc_link "$SG_VPC_LINK" || true
+          
+          SG_RDS=$(aws ec2 describe-security-groups --filters Name=group-name,Values=journalai-dev-rds-sg Name=vpc-id,Values="$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
+          [ -n "$SG_RDS" ] && [ "$SG_RDS" != "None" ] && terraform import aws_security_group.rds "$SG_RDS" || true
+          
+          # API Gateway Resources
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text 2>/dev/null || echo "")
+          if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
+            terraform import aws_apigatewayv2_api.http_api "$API_ID" || true
+            terraform import aws_apigatewayv2_stage.prod "${API_ID}/prod" || true
+            
+            VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='journalai-dev-vpc-link'].VpcLinkId | [0]" --output text 2>/dev/null || echo "")
+            [ -n "$VPC_LINK_ID" ] && [ "$VPC_LINK_ID" != "None" ] && terraform import aws_apigatewayv2_vpc_link.this "$VPC_LINK_ID" || true
+            
+            INT_ID=$(aws apigatewayv2 get-integrations --api-id "$API_ID" --query "Items[0].IntegrationId" --output text 2>/dev/null || echo "")
+            [ -n "$INT_ID" ] && [ "$INT_ID" != "None" ] && terraform import aws_apigatewayv2_integration.backend "${API_ID}/${INT_ID}" || true
+            
+            ROOT_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /'].RouteId | [0]" --output text 2>/dev/null || echo "")
+            [ -n "$ROOT_ROUTE_ID" ] && [ "$ROOT_ROUTE_ID" != "None" ] && terraform import aws_apigatewayv2_route.root "${API_ID}/${ROOT_ROUTE_ID}" || true
+            
+            PROXY_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /{proxy+}'].RouteId | [0]" --output text 2>/dev/null || echo "")
+            [ -n "$PROXY_ROUTE_ID" ] && [ "$PROXY_ROUTE_ID" != "None" ] && terraform import aws_apigatewayv2_route.proxy "${API_ID}/${PROXY_ROUTE_ID}" || true
+          fi
           
           # Validate configuration
           terraform validate
           
-          # Plan and apply
-          terraform plan -out=tfplan
-          terraform apply tfplan
+          # Apply configuration
+          terraform apply -auto-approve
       
       - name: Verify Deployment
         run: |

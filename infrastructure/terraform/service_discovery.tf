@@ -1,25 +1,16 @@
-# Service Discovery - Create or use existing
-data "aws_service_discovery_http_namespace" "existing" {
-  count = var.use_existing_namespace ? 1 : 0
-  name  = "${var.project}-${var.environment}.local"
-}
-
+# Service Discovery namespace - fully managed by Terraform
 resource "aws_service_discovery_private_dns_namespace" "this" {
-  count       = var.use_existing_namespace ? 0 : 1
   name        = "${var.project}-${var.environment}.local"
   description = "Private namespace for ${var.project} ${var.environment}"
   vpc         = data.aws_vpc.default.id
 }
 
-locals {
-  namespace_id = var.use_existing_namespace ? data.aws_service_discovery_http_namespace.existing[0].id : aws_service_discovery_private_dns_namespace.this[0].id
-}
-
+# Service Discovery service - fully managed by Terraform
 resource "aws_service_discovery_service" "backend" {
   name = "backend"
 
   dns_config {
-    namespace_id = local.namespace_id
+    namespace_id = aws_service_discovery_private_dns_namespace.this.id
 
     dns_records {
       ttl  = 10
@@ -29,12 +20,8 @@ resource "aws_service_discovery_service" "backend" {
     routing_policy = "MULTIVALUE"
   }
 
-  # Don't specify health_check_custom_config at all for ECS-managed services
   # ECS handles health checks automatically
-  
-  lifecycle {
-    create_before_destroy = true
-  }
+  # No health_check_custom_config needed
 }
 
 output "service_discovery_arn" {

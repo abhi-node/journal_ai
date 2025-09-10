@@ -127,9 +127,3 @@ variable "apigw_excluded_az_ids" {
   type        = list(string)
   default     = []
 }
-
-variable "use_existing_namespace" {
-  description = "Whether to use existing Service Discovery namespace"
-  type        = bool
-  default     = false
-}

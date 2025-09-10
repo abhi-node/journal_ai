@@ -383,12 +383,7 @@ jobs:
           echo "Waiting for at least one healthy target in target group..."
           for i in {1..60}; do
             HEALTH=$(aws elbv2 describe-target-health --target-group-arn "$TG_ARN" --query 'TargetHealthDescriptions[?TargetHealth.State==`healthy`]' --output json 2>/dev/null || echo '[]')
-            COUNT=$(python - << 'PY'
-import json,sys
-data=json.load(sys.stdin)
-print(len(data))
-PY
-            <<<"$HEALTH")
+            COUNT=$(echo "$HEALTH" | python -c 'import sys,json; print(len(json.load(sys.stdin)))')
             echo "[$i] Healthy targets: $COUNT"
             if [ "$COUNT" -ge 1 ]; then break; fi
             sleep 10

@@ -71,6 +71,16 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
+      - name: Generate Import Blocks
+        working-directory: infrastructure/terraform
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          PROJECT: journalai
+          ENVIRONMENT: dev
+        run: |
+          echo "Generating import blocks for ECR..."
+          chmod +x scripts/generate-imports.sh
+          ./scripts/generate-imports.sh
       - name: Terraform Init
         working-directory: infrastructure/terraform
         env:
@@ -97,7 +107,7 @@ jobs:
           TF_VAR_openai_api_key: placeholder
           TF_INPUT: "false"
         run: |
-          # Plan for ECR only - imports defined in imports.tf will be processed automatically
+          # Plan for ECR only - imports from imports_generated.tf will be processed automatically
           terraform plan -target=aws_ecr_repository.backend -out=ecr-plan
       - name: Terraform Apply (ECR only)
         working-directory: infrastructure/terraform
@@ -162,6 +172,16 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
+      - name: Generate Import Blocks
+        working-directory: infrastructure/terraform
+        env:
+          AWS_REGION: ${{ env.AWS_REGION }}
+          PROJECT: journalai
+          ENVIRONMENT: dev
+        run: |
+          echo "Generating import blocks with actual resource IDs from AWS..."
+          chmod +x scripts/generate-imports.sh
+          ./scripts/generate-imports.sh
       - name: Terraform Init
         working-directory: infrastructure/terraform
         env:
@@ -197,15 +217,9 @@ jobs:
           PROJECT: journalai
           ENVIRONMENT: dev
         run: |
-          echo "Running Terraform plan to check for imports and changes..."
+          echo "Running Terraform plan with generated import blocks..."
           
-          # Make import script executable
-          chmod +x scripts/import-existing.sh
-          
-          # Run the import script for dynamic resources (Service Discovery, Security Groups, API Gateway)
-          ./scripts/import-existing.sh || echo "Some imports may have failed, continuing..."
-          
-          # Run terraform plan - imports defined in imports.tf will be processed automatically
+          # Run terraform plan - imports from imports_generated.tf will be processed automatically
           terraform plan -out=tfplan
           
           echo "Plan complete. Imports and changes are ready to apply."

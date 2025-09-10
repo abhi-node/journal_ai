@@ -22,3 +22,8 @@ resource "aws_service_discovery_service" "backend" {
     failure_threshold = 1
   }
 }
+
+output "service_discovery_arn" {
+  value       = aws_service_discovery_service.backend.arn
+  description = "ARN of the service discovery service for backend"
+}

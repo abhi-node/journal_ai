@@ -154,7 +154,7 @@ const WelcomeScreen = () => {
                 className="text-6xl text-neutral-dark text-center mb-4"
                 style={{ fontFamily: 'Poppins-Bold' }}
               >
-                JournalAI
+                Momentum
               </Text>
               <Text 
                 className="text-lg text-neutral-deep text-center px-4"

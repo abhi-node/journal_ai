@@ -325,7 +325,7 @@ const LoginScreen = () => {
                   <Text 
                     style={[styles.signupPrompt, { fontFamily: theme.typography.fontFamily.regular }]}
                   >
-                    New to JournalAI?
+                    New to Momentum?
                   </Text>
                   <TouchableOpacity
                     onPress={() => navigation.navigate('Signup')}

@@ -337,6 +337,62 @@ jobs:
     needs: tf-apply
     runs-on: ubuntu-latest
     steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Wait for VPC Link + NLB + ECS to be healthy
+        env:
+          PROJECT: journalai
+          ENVIRONMENT: dev
+        run: |
+          set -euo pipefail
+          PREFIX="${PROJECT}-${ENVIRONMENT}"
+          API_NAME="${PREFIX}-http-api"
+          VPC_LINK_NAME="${PREFIX}-vpc-link"
+          NLB_NAME="${PREFIX}-nlb"
+          TG_NAME="${PREFIX}-tg"
+          ECS_CLUSTER_NAME="${PREFIX}-cluster"
+          ECS_SERVICE_NAME="${PREFIX}-service"
+
+          echo "Resolving resource identifiers..."
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='$API_NAME'].ApiId | [0]" --output text || true)
+          VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='$VPC_LINK_NAME'].VpcLinkId | [0]" --output text || true)
+          NLB_ARN=$(aws elbv2 describe-load-balancers --names "$NLB_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text || true)
+          TG_ARN=$(aws elbv2 describe-target-groups --names "$TG_NAME" --query 'TargetGroups[0].TargetGroupArn' --output text || true)
+
+          echo "API_ID=$API_ID VPC_LINK_ID=$VPC_LINK_ID NLB_ARN=$NLB_ARN TG_ARN=$TG_ARN"
+
+          echo "Waiting for VPC Link to be AVAILABLE..."
+          for i in {1..60}; do
+            STATUS=$(aws apigatewayv2 get-vpc-link --vpc-link-id "$VPC_LINK_ID" --query 'Status' --output text 2>/dev/null || echo "")
+            echo "[$i] VPC Link status: $STATUS"
+            if [ "$STATUS" = "AVAILABLE" ]; then break; fi
+            sleep 10
+          done
+
+          echo "Waiting for ECS service to have a running task..."
+          for i in {1..60}; do
+            RC=$(aws ecs describe-services --cluster "$ECS_CLUSTER_NAME" --services "$ECS_SERVICE_NAME" --query 'services[0].runningCount' --output text 2>/dev/null || echo 0)
+            echo "[$i] ECS runningCount=$RC"
+            if [ "$RC" -ge 1 ]; then break; fi
+            sleep 10
+          done
+
+          echo "Waiting for at least one healthy target in target group..."
+          for i in {1..60}; do
+            HEALTH=$(aws elbv2 describe-target-health --target-group-arn "$TG_ARN" --query 'TargetHealthDescriptions[?TargetHealth.State==`healthy`]' --output json 2>/dev/null || echo '[]')
+            COUNT=$(python - << 'PY'
+import json,sys
+data=json.load(sys.stdin)
+print(len(data))
+PY
+            <<<"$HEALTH")
+            echo "[$i] Healthy targets: $COUNT"
+            if [ "$COUNT" -ge 1 ]; then break; fi
+            sleep 10
+          done
       - name: Check /health
         env:
           URL: ${{ needs.tf-apply.outputs.api_url }}

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "Momentum",
+    "slug": "momentum",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -20,7 +20,7 @@
           "audio"
         ],
         "ITSAppUsesNonExemptEncryption": false,
-        "NSMicrophoneUsageDescription": "JournalAI needs access to your microphone to record voice journal entries and transcribe them into text notes."
+        "NSMicrophoneUsageDescription": "Momentum needs access to your microphone to record voice journal entries and transcribe them into text notes."
       }
     },
     "android": {
@@ -28,6 +28,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
+      "package": "com.abhi1sk.frontend",
       "permissions": [
         "RECORD_AUDIO"
       ],
@@ -46,7 +47,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Allow JournalAI to access your microphone."
+          "microphonePermission": "Allow Momentum to access your microphone."
         }
       ]
     ]

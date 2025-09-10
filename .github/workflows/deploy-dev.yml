@@ -285,19 +285,20 @@ jobs:
             terraform import aws_db_instance.postgres "$DB_INSTANCE_ID" || true
           fi
 
-          # Service Discovery namespace and service
+          # Service Discovery service (namespace is now a data source, not managed)
           NAMESPACE_NAME="${PREFIX}.local"
           NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='$NAMESPACE_NAME'].Id | [0]" --output text 2>/dev/null || echo "")
           if [ -n "$NAMESPACE_ID" ] && [ "$NAMESPACE_ID" != "None" ]; then
-            echo "Importing existing namespace $NAMESPACE_NAME with ID $NAMESPACE_ID"
-            terraform import aws_service_discovery_private_dns_namespace.this "$NAMESPACE_ID" || true
+            echo "Found existing namespace $NAMESPACE_NAME with ID $NAMESPACE_ID"
             
-            # Also check for existing service
+            # Check for existing service to import
             SERVICE_ID=$(aws servicediscovery list-services --query "Services[?Name=='backend' && NamespaceId=='$NAMESPACE_ID'].Id | [0]" --output text 2>/dev/null || echo "")
             if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "None" ]; then
               echo "Importing existing service backend with ID $SERVICE_ID"
               terraform import aws_service_discovery_service.backend "$SERVICE_ID" || true
             fi
+          else
+            echo "WARNING: Namespace $NAMESPACE_NAME not found. The data source will fail."
           fi
       - name: Prepare optional TF vars
         run: |

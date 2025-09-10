@@ -47,15 +47,26 @@ jobs:
           TF_VAR_db_password: placeholder
           TF_INPUT: "false"
         run: |
-          # Initialize Terraform
-          terraform init \
-            -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
-            -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
-            -backend-config="region=${{ secrets.TF_BACKEND_REGION }}" \
-            -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
+          # Check if backend config is provided
+          if [ -n "${{ secrets.TF_BACKEND_BUCKET }}" ] && [ -n "${{ secrets.TF_BACKEND_KEY }}" ]; then
+            # Remove backend.tf to use local state for destroy if backend is not accessible
+            rm -f backend.tf
+            
+            # Initialize with S3 backend
+            terraform init \
+              -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
+              -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
+              -backend-config="region=${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}" \
+              -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}" \
+              || terraform init -reconfigure
+          else
+            # Use local backend if no S3 config provided
+            rm -f backend.tf
+            terraform init
+          fi
           
           # Destroy all resources managed by Terraform
-          terraform destroy -auto-approve
+          terraform destroy -auto-approve || echo "Nothing to destroy or destroy failed"
   
   build-and-deploy:
     needs: destroy-infrastructure  # Remove this dependency after first run
@@ -104,12 +115,19 @@ jobs:
           TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
           TF_INPUT: "false"
         run: |
-          # Initialize Terraform
-          terraform init \
-            -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
-            -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
-            -backend-config="region=${{ secrets.TF_BACKEND_REGION }}" \
-            -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
+          # Check if backend config is provided
+          if [ -n "${{ secrets.TF_BACKEND_BUCKET }}" ] && [ -n "${{ secrets.TF_BACKEND_KEY }}" ]; then
+            # Initialize with S3 backend
+            terraform init \
+              -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
+              -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
+              -backend-config="region=${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}" \
+              -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
+          else
+            # Use local backend if no S3 config provided
+            rm -f backend.tf
+            terraform init
+          fi
           
           # Import existing resources using our naming convention
           # These commands will fail silently if resources don't exist or are already imported

@@ -219,10 +219,8 @@ resource "aws_ecs_service" "backend" {
     assign_public_ip = true
   }
 
-  load_balancer {
-    target_group_arn = aws_lb_target_group.backend.arn
-    container_name   = "backend"
-    container_port   = 8000
+  service_registries {
+    registry_arn = aws_service_discovery_service.backend.arn
   }
 
   lifecycle {

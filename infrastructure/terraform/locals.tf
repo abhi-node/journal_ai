@@ -5,7 +5,5 @@ locals {
   ecs_cluster_name = var.ecs_cluster_name != "" ? var.ecs_cluster_name : "${local.name_prefix}-cluster"
   ecs_service_name = var.ecs_service_name != "" ? var.ecs_service_name : "${local.name_prefix}-service"
   api_name         = var.api_name != "" ? var.api_name : "${local.name_prefix}-http-api"
-  alb_name         = var.alb_name != "" ? var.alb_name : "${local.name_prefix}-nlb"
-  tg_name          = var.tg_name != "" ? var.tg_name : "${local.name_prefix}-tg"
   vpc_link_name    = var.vpc_link_name != "" ? var.vpc_link_name : "${local.name_prefix}-vpc-link"
 }

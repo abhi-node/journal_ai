@@ -45,17 +45,6 @@ variable "api_name" {
   default     = ""
 }
 
-variable "alb_name" {
-  description = "Application Load Balancer name"
-  type        = string
-  default     = ""
-}
-
-variable "tg_name" {
-  description = "ALB target group name"
-  type        = string
-  default     = ""
-}
 
 variable "vpc_link_name" {
   description = "API Gateway VPC Link name"

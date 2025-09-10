@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+import logging
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1.api import api_router
@@ -33,7 +34,19 @@ def root():
 @app.get("/health")
 def health_check():
     """Health check endpoint"""
-    return {"status": "healthy"}
+    try:
+        # Lightweight settings check only; avoid touching the DB here
+        db_url_set = bool(settings.DATABASE_URL)
+        redis_url_set = bool(settings.REDIS_URL)
+        return {
+            "status": "healthy",
+            "db_url": "set" if db_url_set else "missing",
+            "redis_url": "set" if redis_url_set else "missing",
+            "env": settings.ENVIRONMENT,
+        }
+    except Exception as e:
+        logging.exception("Health check failed: %s", e)
+        return {"status": "unhealthy", "error": str(e)}
 
 
 if __name__ == "__main__":

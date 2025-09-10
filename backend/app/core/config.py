@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Database
-    DATABASE_URL: str
+    DATABASE_URL: str = "postgresql://journalai:journalai@127.0.0.1:5432/journalai"
     
     # Security
     SECRET_KEY: str
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str
     
     # Redis Configuration
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://127.0.0.1:6379/0"
     
     class Config:
         env_file = ".env"

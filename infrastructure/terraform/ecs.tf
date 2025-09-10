@@ -177,7 +177,7 @@ resource "aws_ecs_task_definition" "backend" {
         },
         {
           name  = "REDIS_URL"
-          value = var.redis_url
+          value = local.redis_url
         },
         {
           name  = "PYTHONPATH"

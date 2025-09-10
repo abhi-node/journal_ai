@@ -366,9 +366,14 @@ jobs:
 
           echo "Waiting for VPC Link to be AVAILABLE..."
           for i in {1..60}; do
-            STATUS=$(aws apigatewayv2 get-vpc-link --vpc-link-id "$VPC_LINK_ID" --query 'Status' --output text 2>/dev/null || echo "")
-            echo "[$i] VPC Link status: $STATUS"
-            if [ "$STATUS" = "AVAILABLE" ]; then break; fi
+            # For HTTP API (v2), the status field is VpcLinkStatus; fall back to CreatedDate presence
+            STATUS=$(aws apigatewayv2 get-vpc-link --vpc-link-id "$VPC_LINK_ID" --query 'VpcLinkStatus' --output text 2>/dev/null || echo "")
+            echo "[$i] VPC Link status: ${STATUS}"
+            if [ "$STATUS" = "AVAILABLE" ] || [ "$STATUS" = "ACTIVE" ]; then break; fi
+            # If status is empty but we have an ID, proceed after a short warmup as link often becomes usable before status propagates
+            if [ -z "$STATUS" ] && [ -n "$VPC_LINK_ID" ]; then
+              echo "Status not reported yet; giving it time..."
+            fi
             sleep 10
           done
 

@@ -284,6 +284,21 @@ jobs:
           if aws rds describe-db-instances --db-instance-identifier "$DB_INSTANCE_ID" >/dev/null 2>&1; then
             terraform import aws_db_instance.postgres "$DB_INSTANCE_ID" || true
           fi
+
+          # Service Discovery namespace and service
+          NAMESPACE_NAME="${PREFIX}.local"
+          NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='$NAMESPACE_NAME'].Id | [0]" --output text 2>/dev/null || echo "")
+          if [ -n "$NAMESPACE_ID" ] && [ "$NAMESPACE_ID" != "None" ]; then
+            echo "Importing existing namespace $NAMESPACE_NAME with ID $NAMESPACE_ID"
+            terraform import aws_service_discovery_private_dns_namespace.this "$NAMESPACE_ID" || true
+            
+            # Also check for existing service
+            SERVICE_ID=$(aws servicediscovery list-services --query "Services[?Name=='backend' && NamespaceId=='$NAMESPACE_ID'].Id | [0]" --output text 2>/dev/null || echo "")
+            if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "None" ]; then
+              echo "Importing existing service backend with ID $SERVICE_ID"
+              terraform import aws_service_discovery_service.backend "$SERVICE_ID" || true
+            fi
+          fi
       - name: Prepare optional TF vars
         run: |
           # Only set AZ exclusions if provided; otherwise let TF default [] apply

@@ -45,14 +45,14 @@ variable "api_name" {
   default     = ""
 }
 
-variable "nlb_name" {
-  description = "Network Load Balancer name"
+variable "alb_name" {
+  description = "Application Load Balancer name"
   type        = string
   default     = ""
 }
 
 variable "tg_name" {
-  description = "NLB target group name"
+  description = "ALB target group name"
   type        = string
   default     = ""
 }

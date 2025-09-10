@@ -18,7 +18,7 @@ env:
   ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}
   ECS_SERVICE: ${{ secrets.ECS_SERVICE }}
   API_NAME: ${{ secrets.API_NAME }}
-  NLB_NAME: ${{ secrets.NLB_NAME }}
+  ALB_NAME: ${{ secrets.ALB_NAME || 'journalai-dev-nlb' }}
   TG_NAME: ${{ secrets.TG_NAME }}
   VPC_LINK_NAME: ${{ secrets.VPC_LINK_NAME }}
 
@@ -205,7 +205,7 @@ jobs:
           ECS_SERVICE_NAME="${PREFIX}-service"
           LOG_GROUP_NAME="/ecs/${ECS_SERVICE_NAME}"
           DB_SUBNET_GROUP_NAME="${PREFIX}-db-subnets"
-          NLB_NAME="${PREFIX}-nlb"
+          ALB_NAME="${PREFIX}-nlb"
           TG_NAME="${PREFIX}-tg"
           ROLE_NAME="${PREFIX}-ecsTaskExecutionRole"
           SG_TASKS_NAME="${PREFIX}-ecs-tasks-sg"
@@ -252,12 +252,12 @@ jobs:
             if [ -n "$SGRDS_ID" ] && [ "$SGRDS_ID" != "None" ]; then terraform import aws_security_group.rds "$SGRDS_ID" || true; fi
           fi
 
-          # NLB and target group by name
-          NLB_ARN=$(aws elbv2 describe-load-balancers --names "$NLB_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "")
-          if [ -n "$NLB_ARN" ] && [ "$NLB_ARN" != "None" ]; then
-            terraform import aws_lb.nlb "$NLB_ARN" || true
+          # ALB and target group by name
+          ALB_ARN=$(aws elbv2 describe-load-balancers --names "$ALB_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo "")
+          if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
+            terraform import aws_lb.alb "$ALB_ARN" || true
             # Listener on port 80
-            LIST_ARN=$(aws elbv2 describe-listeners --load-balancer-arn "$NLB_ARN" --query "Listeners[?Port==\`80\`].ListenerArn | [0]" --output text 2>/dev/null || echo "")
+            LIST_ARN=$(aws elbv2 describe-listeners --load-balancer-arn "$ALB_ARN" --query "Listeners[?Port==\`80\`].ListenerArn | [0]" --output text 2>/dev/null || echo "")
             if [ -n "$LIST_ARN" ] && [ "$LIST_ARN" != "None" ]; then terraform import aws_lb_listener.http "$LIST_ARN" || true; fi
           fi
 
@@ -320,7 +320,7 @@ jobs:
           TF_VAR_ecs_cluster_name: ${{ env.ECS_CLUSTER }}
           TF_VAR_ecs_service_name: ${{ env.ECS_SERVICE }}
           TF_VAR_api_name: ${{ env.API_NAME }}
-          TF_VAR_nlb_name: ${{ env.NLB_NAME }}
+          TF_VAR_alb_name: ${{ env.ALB_NAME }}
           TF_VAR_tg_name: ${{ env.TG_NAME }}
           TF_VAR_vpc_link_name: ${{ env.VPC_LINK_NAME }}
           TF_VAR_secret_key: ${{ secrets.SECRET_KEY }}
@@ -351,7 +351,7 @@ jobs:
           PREFIX="${PROJECT}-${ENVIRONMENT}"
           API_NAME="${PREFIX}-http-api"
           VPC_LINK_NAME="${PREFIX}-vpc-link"
-          NLB_NAME="${PREFIX}-nlb"
+          ALB_NAME="${PREFIX}-nlb"
           TG_NAME="${PREFIX}-tg"
           ECS_CLUSTER_NAME="${PREFIX}-cluster"
           ECS_SERVICE_NAME="${PREFIX}-service"
@@ -359,10 +359,10 @@ jobs:
           echo "Resolving resource identifiers..."
           API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='$API_NAME'].ApiId | [0]" --output text || true)
           VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='$VPC_LINK_NAME'].VpcLinkId | [0]" --output text || true)
-          NLB_ARN=$(aws elbv2 describe-load-balancers --names "$NLB_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text || true)
+          ALB_ARN=$(aws elbv2 describe-load-balancers --names "$ALB_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text || true)
           TG_ARN=$(aws elbv2 describe-target-groups --names "$TG_NAME" --query 'TargetGroups[0].TargetGroupArn' --output text || true)
 
-          echo "API_ID=$API_ID VPC_LINK_ID=$VPC_LINK_ID NLB_ARN=$NLB_ARN TG_ARN=$TG_ARN"
+          echo "API_ID=$API_ID VPC_LINK_ID=$VPC_LINK_ID ALB_ARN=$ALB_ARN TG_ARN=$TG_ARN"
 
           echo "Waiting for VPC Link to be AVAILABLE..."
           for i in {1..60}; do

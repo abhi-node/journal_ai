@@ -1,15 +1,15 @@
-resource "aws_lb" "nlb" {
-  name                             = local.nlb_name
-  load_balancer_type               = "network"
-  internal                         = true
-  subnets                          = local.vpc_link_subnets
-  enable_cross_zone_load_balancing = true
+resource "aws_lb" "alb" {
+  name               = local.alb_name
+  load_balancer_type = "application"
+  internal           = true
+  subnets            = local.vpc_link_subnets
+  security_groups    = [aws_security_group.alb.id]
 }
 
 resource "aws_lb_target_group" "backend" {
   name        = local.tg_name
   port        = 8000
-  protocol    = "TCP"
+  protocol    = "HTTP"
   target_type = "ip"
   vpc_id      = data.aws_vpc.default.id
 
@@ -27,9 +27,9 @@ resource "aws_lb_target_group" "backend" {
 }
 
 resource "aws_lb_listener" "http" {
-  load_balancer_arn = aws_lb.nlb.arn
+  load_balancer_arn = aws_lb.alb.arn
   port              = 80
-  protocol          = "TCP"
+  protocol          = "HTTP"
 
   default_action {
     type             = "forward"
@@ -37,6 +37,6 @@ resource "aws_lb_listener" "http" {
   }
 }
 
-output "nlb_dns_name" {
-  value = aws_lb.nlb.dns_name
+output "alb_dns_name" {
+  value = aws_lb.alb.dns_name
 }

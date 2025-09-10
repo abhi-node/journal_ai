@@ -1,4 +1,4 @@
-name: Deploy Dev (ECS + API GW via Terraform)
+name: Deploy Dev - Terraform Infrastructure & ECS
 
 on:
   push:
@@ -14,13 +14,13 @@ permissions:
 
 env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPO: journalai-dev-backend
   PROJECT: journalai
   ENVIRONMENT: dev
 
 jobs:
-  # TEMPORARY: Remove this job after first run
-  destroy-infrastructure:
+  # TEMPORARY: Remove this job after first successful run
+  destroy-all:
+    name: Destroy Existing Infrastructure
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,236 +31,210 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
       
-      - name: Force Delete All Infrastructure
+      - name: Force Delete All Resources
         run: |
           set +e  # Continue on errors
           echo "========================================"
-          echo "FORCE DELETING ALL INFRASTRUCTURE"
+          echo "DESTROYING ALL EXISTING INFRASTRUCTURE"
           echo "========================================"
           
-          # Get VPC ID first
           VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
-          echo "VPC ID: $VPC_ID"
           
-          # 1. ECS - Delete Service First
-          echo ">>> Deleting ECS Service..."
+          # Delete ECS Service and Tasks
           aws ecs update-service --cluster journalai-dev-cluster --service journalai-dev-service --desired-count 0 2>/dev/null
-          sleep 5
-          aws ecs delete-service --cluster journalai-dev-cluster --service journalai-dev-service --force 2>/dev/null
-          
-          # Stop all tasks
-          echo ">>> Stopping all ECS tasks..."
-          TASK_ARNS=$(aws ecs list-tasks --cluster journalai-dev-cluster --query 'taskArns[]' --output text 2>/dev/null)
-          for TASK in $TASK_ARNS; do
-            echo "Stopping task: $TASK"
-            aws ecs stop-task --cluster journalai-dev-cluster --task "$TASK" 2>/dev/null
-          done
           sleep 10
+          aws ecs delete-service --cluster journalai-dev-cluster --service journalai-dev-service --force 2>/dev/null
+          TASK_ARNS=$(aws ecs list-tasks --cluster journalai-dev-cluster --query 'taskArns[]' --output text 2>/dev/null)
+          for TASK in $TASK_ARNS; do aws ecs stop-task --cluster journalai-dev-cluster --task "$TASK" 2>/dev/null; done
           
-          # 2. Service Discovery - Must deregister instances first
-          echo ">>> Deleting Service Discovery..."
+          # Delete Service Discovery
           NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='journalai-dev.local'].Id | [0]" --output text 2>/dev/null)
           if [ -n "$NAMESPACE_ID" ] && [ "$NAMESPACE_ID" != "None" ]; then
-            echo "Found namespace: $NAMESPACE_ID"
             SERVICE_ID=$(aws servicediscovery list-services --filters "Name=NAMESPACE_ID,Values=$NAMESPACE_ID" --query "Services[?Name=='backend'].Id | [0]" --output text 2>/dev/null)
             if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "None" ]; then
-              echo "Found service: $SERVICE_ID"
-              # Deregister all instances
               INSTANCES=$(aws servicediscovery list-instances --service-id "$SERVICE_ID" --query 'Instances[].Id' --output text 2>/dev/null)
               for INSTANCE_ID in $INSTANCES; do
-                echo "Deregistering instance: $INSTANCE_ID"
                 aws servicediscovery deregister-instance --service-id "$SERVICE_ID" --instance-id "$INSTANCE_ID" 2>/dev/null
               done
               sleep 5
-              # Delete service
               aws servicediscovery delete-service --id "$SERVICE_ID" 2>/dev/null
-              echo "Deleted service discovery service"
             fi
-            sleep 5
-            # Delete namespace
             aws servicediscovery delete-namespace --id "$NAMESPACE_ID" 2>/dev/null
-            echo "Deleted namespace"
           fi
           
-          # 3. API Gateway - Delete in correct order
-          echo ">>> Deleting API Gateway..."
+          # Delete API Gateway
           API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text 2>/dev/null)
           if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
-            echo "Found API: $API_ID"
-            # Delete routes
-            ROUTE_IDS=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[].RouteId" --output text 2>/dev/null)
-            for ROUTE_ID in $ROUTE_IDS; do
-              echo "Deleting route: $ROUTE_ID"
+            for ROUTE_ID in $(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[].RouteId" --output text 2>/dev/null); do
               aws apigatewayv2 delete-route --api-id "$API_ID" --route-id "$ROUTE_ID" 2>/dev/null
             done
-            # Delete integrations
-            INT_IDS=$(aws apigatewayv2 get-integrations --api-id "$API_ID" --query "Items[].IntegrationId" --output text 2>/dev/null)
-            for INT_ID in $INT_IDS; do
-              echo "Deleting integration: $INT_ID"
+            for INT_ID in $(aws apigatewayv2 get-integrations --api-id "$API_ID" --query "Items[].IntegrationId" --output text 2>/dev/null); do
               aws apigatewayv2 delete-integration --api-id "$API_ID" --integration-id "$INT_ID" 2>/dev/null
             done
-            # Delete stage
             aws apigatewayv2 delete-stage --api-id "$API_ID" --stage-name prod 2>/dev/null
-            # Delete API
             aws apigatewayv2 delete-api --api-id "$API_ID" 2>/dev/null
-            echo "Deleted API Gateway"
           fi
           
-          # 4. VPC Link
-          echo ">>> Deleting VPC Link..."
+          # Delete VPC Link
           VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='journalai-dev-vpc-link'].VpcLinkId | [0]" --output text 2>/dev/null)
-          if [ -n "$VPC_LINK_ID" ] && [ "$VPC_LINK_ID" != "None" ]; then
-            echo "Found VPC Link: $VPC_LINK_ID"
-            aws apigatewayv2 delete-vpc-link --vpc-link-id "$VPC_LINK_ID" 2>/dev/null
-            echo "Deleted VPC Link"
-          fi
+          [ -n "$VPC_LINK_ID" ] && [ "$VPC_LINK_ID" != "None" ] && aws apigatewayv2 delete-vpc-link --vpc-link-id "$VPC_LINK_ID" 2>/dev/null
           
-          # 5. ECS Cluster
-          echo ">>> Deleting ECS Cluster..."
+          # Delete ECS Cluster
           aws ecs delete-cluster --cluster journalai-dev-cluster 2>/dev/null
-          echo "Deleted ECS Cluster"
           
-          # 6. Task Definitions
-          echo ">>> Deregistering Task Definitions..."
-          TASK_DEF_ARNS=$(aws ecs list-task-definitions --family-prefix journalai-dev --query 'taskDefinitionArns[]' --output text 2>/dev/null)
-          for TASK_DEF in $TASK_DEF_ARNS; do
-            echo "Deregistering: $TASK_DEF"
-            aws ecs deregister-task-definition --task-definition "$TASK_DEF" 2>/dev/null
-          done
-          
-          # 7. CloudWatch Log Group
-          echo ">>> Deleting CloudWatch Logs..."
+          # Delete CloudWatch Logs
           aws logs delete-log-group --log-group-name /ecs/journalai-dev-service 2>/dev/null
-          echo "Deleted CloudWatch Log Group"
           
-          # 8. ECR Repository - FORCE DELETE
-          echo ">>> Force Deleting ECR Repository..."
+          # Delete ECR Repository
           aws ecr delete-repository --repository-name journalai-dev-backend --force 2>/dev/null
-          if [ $? -eq 0 ]; then
-            echo "Deleted ECR Repository"
-          else
-            echo "ECR Repository not found or already deleted"
-          fi
           
-          # 9. RDS Instance
-          echo ">>> Deleting RDS Instance..."
-          aws rds delete-db-instance \
-            --db-instance-identifier journalai-dev-db \
-            --skip-final-snapshot \
-            --delete-automated-backups 2>/dev/null
-          echo "RDS deletion initiated"
-          
-          # Wait for RDS to be deleted
-          echo ">>> Waiting for RDS deletion..."
-          for i in {1..60}; do
+          # Delete RDS
+          aws rds delete-db-instance --db-instance-identifier journalai-dev-db --skip-final-snapshot --delete-automated-backups 2>/dev/null
+          for i in {1..30}; do
             STATUS=$(aws rds describe-db-instances --db-instance-identifier journalai-dev-db --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null)
-            if [ -z "$STATUS" ] || [ "$STATUS" = "None" ]; then
-              echo "RDS instance deleted"
-              break
-            fi
-            echo "RDS status: $STATUS (attempt $i/60)"
-            if [ "$STATUS" = "deleting" ]; then
-              echo "RDS is being deleted..."
-            fi
+            [ -z "$STATUS" ] || [ "$STATUS" = "None" ] && break
             sleep 10
           done
-          
-          # 10. DB Subnet Group - MUST be after RDS deletion
-          echo ">>> Deleting DB Subnet Group..."
           aws rds delete-db-subnet-group --db-subnet-group-name journalai-dev-db-subnets 2>/dev/null
-          if [ $? -eq 0 ]; then
-            echo "Deleted DB Subnet Group"
+          
+          # Delete Security Groups
+          for SG_NAME in journalai-dev-ecs-tasks-sg journalai-dev-apigw-vpc-link-sg journalai-dev-rds-sg; do
+            SG_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values="$SG_NAME" Name=vpc-id,Values="$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+            if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+              aws ec2 revoke-security-group-ingress --group-id "$SG_ID" --ip-permissions "$(aws ec2 describe-security-groups --group-ids "$SG_ID" --query 'SecurityGroups[0].IpPermissions' 2>/dev/null || echo '[]')" 2>/dev/null
+              aws ec2 delete-security-group --group-id "$SG_ID" 2>/dev/null
+            fi
+          done
+          
+          # Delete IAM Role
+          aws iam detach-role-policy --role-name journalai-dev-ecsTaskExecutionRole --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy 2>/dev/null
+          aws iam delete-role --role-name journalai-dev-ecsTaskExecutionRole 2>/dev/null
+          
+          echo "Destruction complete!"
+
+  infrastructure:
+    name: Provision Infrastructure
+    needs: destroy-all  # Remove this dependency after first run
+    runs-on: ubuntu-latest
+    outputs:
+      ecr_repository_url: ${{ steps.outputs.outputs.ecr_repository_url }}
+      ecs_cluster_name: ${{ steps.outputs.outputs.ecs_cluster_name }}
+      ecs_service_name: ${{ steps.outputs.outputs.ecs_service_name }}
+      ecs_task_family: ${{ steps.outputs.outputs.ecs_task_family }}
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.6
+          terraform_wrapper: false  # Important for getting outputs
+      
+      - name: Terraform Init
+        working-directory: infrastructure/terraform
+        run: |
+          if [ -n "${{ secrets.TF_BACKEND_BUCKET }}" ] && [ -n "${{ secrets.TF_BACKEND_KEY }}" ]; then
+            terraform init \
+              -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
+              -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
+              -backend-config="region=${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}" \
+              -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
           else
-            echo "DB Subnet Group not found or still in use"
+            rm -f backend.tf
+            terraform init
+          fi
+      
+      - name: Import Existing Resources
+        working-directory: infrastructure/terraform
+        run: |
+          set +e  # Continue on errors (resources might not exist)
+          
+          VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
+          
+          # Try to import all resources that might exist
+          terraform import aws_ecr_repository.backend journalai-dev-backend 2>/dev/null || true
+          terraform import aws_ecs_cluster.this journalai-dev-cluster 2>/dev/null || true
+          terraform import aws_ecs_service.backend journalai-dev-cluster/journalai-dev-service 2>/dev/null || true
+          terraform import aws_cloudwatch_log_group.ecs /ecs/journalai-dev-service 2>/dev/null || true
+          terraform import aws_iam_role.ecs_task_execution_role journalai-dev-ecsTaskExecutionRole 2>/dev/null || true
+          terraform import aws_db_instance.postgres journalai-dev-db 2>/dev/null || true
+          terraform import aws_db_subnet_group.db journalai-dev-db-subnets 2>/dev/null || true
+          
+          # Import Service Discovery
+          NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='journalai-dev.local'].Id | [0]" --output text 2>/dev/null)
+          if [ -n "$NAMESPACE_ID" ] && [ "$NAMESPACE_ID" != "None" ]; then
+            terraform import aws_service_discovery_private_dns_namespace.this "${NAMESPACE_ID}:${VPC_ID}" 2>/dev/null || true
+            SERVICE_ID=$(aws servicediscovery list-services --filters "Name=NAMESPACE_ID,Values=$NAMESPACE_ID" --query "Services[?Name=='backend'].Id | [0]" --output text 2>/dev/null)
+            [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "None" ] && terraform import aws_service_discovery_service.backend "$SERVICE_ID" 2>/dev/null || true
           fi
           
-          # 11. Security Groups - Delete all rules first, then groups
-          echo ">>> Deleting Security Groups..."
+          # Import Security Groups
           for SG_NAME in journalai-dev-ecs-tasks-sg journalai-dev-apigw-vpc-link-sg journalai-dev-rds-sg; do
-            echo "Processing security group: $SG_NAME"
-            SG_ID=$(aws ec2 describe-security-groups \
-              --filters Name=group-name,Values="$SG_NAME" Name=vpc-id,Values="$VPC_ID" \
-              --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+            SG_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values="$SG_NAME" Name=vpc-id,Values="$VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+            if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+              RESOURCE_NAME=$(echo $SG_NAME | sed 's/journalai-dev-//' | sed 's/-sg$//' | tr '-' '_')
+              terraform import aws_security_group.${RESOURCE_NAME} "$SG_ID" 2>/dev/null || true
+            fi
+          done
+          
+          # Import API Gateway
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text 2>/dev/null)
+          if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
+            terraform import aws_apigatewayv2_api.http_api "$API_ID" 2>/dev/null || true
+            terraform import aws_apigatewayv2_stage.prod "${API_ID}/prod" 2>/dev/null || true
             
-            if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
-              echo "Found security group: $SG_ID"
-              
-              # Get and revoke all ingress rules
-              INGRESS_RULES=$(aws ec2 describe-security-groups --group-ids "$SG_ID" --query 'SecurityGroups[0].IpPermissions' 2>/dev/null)
-              if [ "$INGRESS_RULES" != "[]" ] && [ -n "$INGRESS_RULES" ]; then
-                echo "Revoking ingress rules..."
-                aws ec2 revoke-security-group-ingress --group-id "$SG_ID" --ip-permissions "$INGRESS_RULES" 2>/dev/null
+            VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='journalai-dev-vpc-link'].VpcLinkId | [0]" --output text 2>/dev/null)
+            [ -n "$VPC_LINK_ID" ] && [ "$VPC_LINK_ID" != "None" ] && terraform import aws_apigatewayv2_vpc_link.this "$VPC_LINK_ID" 2>/dev/null || true
+            
+            INT_ID=$(aws apigatewayv2 get-integrations --api-id "$API_ID" --query "Items[0].IntegrationId" --output text 2>/dev/null)
+            [ -n "$INT_ID" ] && [ "$INT_ID" != "None" ] && terraform import aws_apigatewayv2_integration.backend "${API_ID}/${INT_ID}" 2>/dev/null || true
+            
+            for ROUTE_KEY in "ANY /" "ANY /{proxy+}"; do
+              ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='$ROUTE_KEY'].RouteId | [0]" --output text 2>/dev/null)
+              if [ -n "$ROUTE_ID" ] && [ "$ROUTE_ID" != "None" ]; then
+                [ "$ROUTE_KEY" = "ANY /" ] && terraform import aws_apigatewayv2_route.root "${API_ID}/${ROUTE_ID}" 2>/dev/null || true
+                [ "$ROUTE_KEY" = "ANY /{proxy+}" ] && terraform import aws_apigatewayv2_route.proxy "${API_ID}/${ROUTE_ID}" 2>/dev/null || true
               fi
-              
-              # Get and revoke all egress rules (except default)
-              EGRESS_RULES=$(aws ec2 describe-security-groups --group-ids "$SG_ID" --query 'SecurityGroups[0].IpPermissionsEgress' 2>/dev/null)
-              if [ "$EGRESS_RULES" != "[]" ] && [ -n "$EGRESS_RULES" ]; then
-                echo "Revoking egress rules..."
-                aws ec2 revoke-security-group-egress --group-id "$SG_ID" --ip-permissions "$EGRESS_RULES" 2>/dev/null
-              fi
-              
-              sleep 2
-              
-              # Delete the security group
-              aws ec2 delete-security-group --group-id "$SG_ID" 2>/dev/null
-              if [ $? -eq 0 ]; then
-                echo "Deleted security group: $SG_NAME"
-              else
-                echo "Failed to delete security group: $SG_NAME (may still be in use)"
-              fi
-            fi
-          done
+            done
+          fi
           
-          # 12. IAM Role
-          echo ">>> Deleting IAM Role..."
-          # Detach all policies
-          ATTACHED_POLICIES=$(aws iam list-attached-role-policies --role-name journalai-dev-ecsTaskExecutionRole --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null)
-          for POLICY_ARN in $ATTACHED_POLICIES; do
-            echo "Detaching policy: $POLICY_ARN"
-            aws iam detach-role-policy --role-name journalai-dev-ecsTaskExecutionRole --policy-arn "$POLICY_ARN" 2>/dev/null
-          done
-          # Delete role
-          aws iam delete-role --role-name journalai-dev-ecsTaskExecutionRole 2>/dev/null
-          echo "Deleted IAM Role"
-          
-          # 13. Final cleanup - Try again for stubborn resources
-          echo ">>> Final cleanup pass..."
-          sleep 10
-          
-          # Try ECR again
-          aws ecr delete-repository --repository-name journalai-dev-backend --force 2>/dev/null && echo "ECR deleted in final pass"
-          
-          # Try DB subnet group again
-          aws rds delete-db-subnet-group --db-subnet-group-name journalai-dev-db-subnets 2>/dev/null && echo "DB Subnet Group deleted in final pass"
-          
-          # Try security groups again
-          for SG_NAME in journalai-dev-ecs-tasks-sg journalai-dev-apigw-vpc-link-sg journalai-dev-rds-sg; do
-            SG_ID=$(aws ec2 describe-security-groups \
-              --filters Name=group-name,Values="$SG_NAME" Name=vpc-id,Values="$VPC_ID" \
-              --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
-            if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
-              aws ec2 delete-security-group --group-id "$SG_ID" --force 2>/dev/null && echo "Deleted $SG_NAME in final pass"
-            fi
-          done
-          
-          echo "========================================"
-          echo "FORCE DELETION COMPLETE"
-          echo "========================================"
-          
-          # List any remaining resources
-          echo ">>> Checking for remaining resources..."
-          echo "ECR Repositories:"
-          aws ecr describe-repositories --query "repositories[?contains(repositoryName, 'journalai-dev')].repositoryName" --output text
-          echo "Security Groups:"
-          aws ec2 describe-security-groups --filters Name=vpc-id,Values="$VPC_ID" --query "SecurityGroups[?contains(GroupName, 'journalai-dev')].GroupName" --output text
-          echo "RDS Instances:"
-          aws rds describe-db-instances --query "DBInstances[?contains(DBInstanceIdentifier, 'journalai-dev')].DBInstanceIdentifier" --output text
-          echo "DB Subnet Groups:"
-          aws rds describe-db-subnet-groups --query "DBSubnetGroups[?contains(DBSubnetGroupName, 'journalai-dev')].DBSubnetGroupName" --output text
-  
-  build-and-deploy:
-    needs: destroy-infrastructure  # Remove this dependency after first run
+          echo "Import complete"
+      
+      - name: Terraform Apply
+        working-directory: infrastructure/terraform
+        env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+          TF_VAR_project: ${{ env.PROJECT }}
+          TF_VAR_environment: ${{ env.ENVIRONMENT }}
+          TF_VAR_image_tag: placeholder  # Will be updated after build
+          TF_VAR_secret_key: ${{ secrets.SECRET_KEY }}
+          TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
+        run: |
+          terraform validate
+          terraform apply -auto-approve
+      
+      - name: Get Terraform Outputs
+        id: outputs
+        working-directory: infrastructure/terraform
+        run: |
+          echo "ecr_repository_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
+          echo "ecs_cluster_name=${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-cluster" >> $GITHUB_OUTPUT
+          echo "ecs_service_name=${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-service" >> $GITHUB_OUTPUT
+          echo "ecs_task_family=${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-task" >> $GITHUB_OUTPUT
+
+  build:
+    name: Build & Push Docker Image
+    needs: infrastructure
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
     steps:
       - uses: actions/checkout@v4
       
@@ -273,77 +247,109 @@ jobs:
       - uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
       
-      - name: Create ECR and Build Docker Image
-        working-directory: backend
-        env:
-          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+      - name: Set Image Metadata
+        id: meta
         run: |
-          # Create ECR repository
-          aws ecr create-repository --repository-name $ECR_REPO --image-scanning-configuration scanOnPush=true 2>/dev/null || \
-            echo "ECR repository already exists or creation failed"
+          echo "image_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          echo "ecr_repository_url=${{ needs.infrastructure.outputs.ecr_repository_url }}" >> $GITHUB_OUTPUT
+      
+      - name: Build Docker Image
+        working-directory: backend
+        run: |
+          docker build -f Dockerfile \
+            -t ${{ steps.meta.outputs.ecr_repository_url }}:${{ steps.meta.outputs.image_tag }} \
+            -t ${{ steps.meta.outputs.ecr_repository_url }}:dev-latest \
+            .
+      
+      - name: Push Docker Image
+        run: |
+          docker push ${{ steps.meta.outputs.ecr_repository_url }}:${{ steps.meta.outputs.image_tag }}
+          docker push ${{ steps.meta.outputs.ecr_repository_url }}:dev-latest
+
+  deploy:
+    name: Deploy to ECS
+    needs: [infrastructure, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Update ECS Service
+        run: |
+          # Get current task definition
+          TASK_DEFINITION=$(aws ecs describe-task-definition \
+            --task-definition ${{ needs.infrastructure.outputs.ecs_task_family }} \
+            --query 'taskDefinition' \
+            --output json)
           
-          # Build and push image
-          docker build -f Dockerfile -t $REGISTRY/$ECR_REPO:$IMAGE_TAG -t $REGISTRY/$ECR_REPO:dev-latest .
-          docker push $REGISTRY/$ECR_REPO:$IMAGE_TAG
-          docker push $REGISTRY/$ECR_REPO:dev-latest
+          # Update the image in container definitions
+          NEW_TASK_DEF=$(echo $TASK_DEFINITION | \
+            jq --arg IMAGE "${{ needs.infrastructure.outputs.ecr_repository_url }}:${{ needs.build.outputs.image_tag }}" \
+            '.containerDefinitions[0].image = $IMAGE | .containerDefinitions[2].image = $IMAGE | .containerDefinitions[3].image = $IMAGE')
+          
+          # Remove fields that can't be in register request
+          NEW_TASK_DEF=$(echo $NEW_TASK_DEF | \
+            jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          
+          # Register new task definition
+          NEW_TASK_ARN=$(echo $NEW_TASK_DEF | \
+            aws ecs register-task-definition --cli-input-json file:///dev/stdin \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          
+          echo "New task definition: $NEW_TASK_ARN"
+          
+          # Update service with new task definition
+          aws ecs update-service \
+            --cluster ${{ needs.infrastructure.outputs.ecs_cluster_name }} \
+            --service ${{ needs.infrastructure.outputs.ecs_service_name }} \
+            --task-definition $NEW_TASK_ARN \
+            --force-new-deployment
+          
+          # Wait for service to stabilize
+          aws ecs wait services-stable \
+            --cluster ${{ needs.infrastructure.outputs.ecs_cluster_name }} \
+            --services ${{ needs.infrastructure.outputs.ecs_service_name }}
       
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
+          terraform_wrapper: false
       
-      - name: Terraform Deploy (Fresh)
+      - name: Get API URL
+        id: api-url
         working-directory: infrastructure/terraform
-        env:
-          TF_VAR_aws_region: ${{ env.AWS_REGION }}
-          TF_VAR_project: ${{ env.PROJECT }}
-          TF_VAR_environment: ${{ env.ENVIRONMENT }}
-          TF_VAR_image_tag: dev-latest
-          TF_VAR_secret_key: ${{ secrets.SECRET_KEY }}
-          TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
-          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
-          TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
-          TF_INPUT: "false"
         run: |
-          # Check if backend config is provided
           if [ -n "${{ secrets.TF_BACKEND_BUCKET }}" ] && [ -n "${{ secrets.TF_BACKEND_KEY }}" ]; then
-            # Initialize with S3 backend
             terraform init \
               -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
               -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
               -backend-config="region=${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}" \
               -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
           else
-            # Use local backend if no S3 config provided
             rm -f backend.tf
             terraform init
           fi
-          
-          # Validate configuration
-          terraform validate
-          
-          # Apply configuration (everything should be created fresh)
-          terraform apply -auto-approve
+          echo "api_url=$(terraform output -raw api_gateway_invoke_url)" >> $GITHUB_OUTPUT
       
-      - name: Verify Deployment
+      - name: Health Check
         run: |
-          # Wait for services to be ready
-          sleep 30
-          
-          # Get API URL from Terraform output
-          cd infrastructure/terraform
-          API_URL=$(terraform output -raw api_gateway_invoke_url)
-          
-          # Health check with retries
+          API_URL="${{ steps.api-url.outputs.api_url }}"
           echo "Checking $API_URL/health"
+          
           for i in {1..30}; do
             code=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/health" || true)
             if [ "$code" = "200" ]; then
-              echo "✓ Health check passed"
+              echo "✅ Health check passed!"
               exit 0
             fi
-            echo "Attempt $i: got $code, retrying..."
+            echo "Attempt $i/30: HTTP $code, retrying..."
             sleep 10
           done
-          echo "Health check failed after 30 attempts"
+          
+          echo "❌ Health check failed after 30 attempts"
           exit 1

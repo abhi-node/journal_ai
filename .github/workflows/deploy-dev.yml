@@ -88,30 +88,22 @@ jobs:
           else
             terraform init
           fi
-      - name: Terraform Import ECR repo if pre-existing (idempotent)
-        working-directory: infrastructure/terraform
-        env:
-          TF_VAR_aws_region: ${{ env.AWS_REGION }}
-          TF_VAR_ecr_repository_name: ${{ env.ECR_REPO }}
-          TF_INPUT: "false"
-        run: |
-          set -euo pipefail
-          REPO_NAME="${{ env.ECR_REPO }}"; if [ -z "${REPO_NAME}" ]; then REPO_NAME="journalai-dev-backend"; fi
-          # If repo exists, import it, otherwise let Terraform create it in the next step
-          if aws ecr describe-repositories --repository-names "$REPO_NAME" >/dev/null 2>&1; then
-            echo "ECR repo $REPO_NAME exists; importing into state"
-            terraform import aws_ecr_repository.backend "$REPO_NAME" || true
-          else
-            echo "ECR repo $REPO_NAME does not exist; Terraform will create it"
-          fi
-      - name: Terraform Apply (ECR only)
+      - name: Terraform Plan for ECR
         working-directory: infrastructure/terraform
         env:
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_ecr_repository_name: ${{ env.ECR_REPO }}
           TF_VAR_secret_key: placeholder
           TF_VAR_openai_api_key: placeholder
-        run: terraform apply -auto-approve -target=aws_ecr_repository.backend
+          TF_INPUT: "false"
+        run: |
+          # Plan for ECR only - imports defined in imports.tf will be processed automatically
+          terraform plan -target=aws_ecr_repository.backend -out=ecr-plan
+      - name: Terraform Apply (ECR only)
+        working-directory: infrastructure/terraform
+        run: |
+          # Apply ECR plan - this handles import if needed
+          terraform apply ecr-plan
       - name: Read ECR repo URL
         id: ecr-url
         working-directory: infrastructure/terraform
@@ -187,131 +179,9 @@ jobs:
           else
             terraform init
           fi
-      - name: Import pre-existing infra (optional, idempotent)
+      - name: Terraform Plan with Import
         working-directory: infrastructure/terraform
         env:
-          TF_VAR_aws_region: ${{ env.AWS_REGION }}
-          TF_INPUT: "false"
-          PROJECT: journalai
-          ENVIRONMENT: dev
-        run: |
-          set -euo pipefail
-          PREFIX="${PROJECT}-${ENVIRONMENT}"
-          # Derive names used by Terraform locals
-          ECR_REPO_NAME="${PREFIX}-backend"
-          ECS_CLUSTER_NAME="${PREFIX}-cluster"
-          ECS_SERVICE_NAME="${PREFIX}-service"
-          LOG_GROUP_NAME="/ecs/${ECS_SERVICE_NAME}"
-          DB_SUBNET_GROUP_NAME="${PREFIX}-db-subnets"
-          ROLE_NAME="${PREFIX}-ecsTaskExecutionRole"
-          SG_TASKS_NAME="${PREFIX}-ecs-tasks-sg"
-          SG_VPC_LINK_NAME="${PREFIX}-apigw-vpc-link-sg"
-          SG_RDS_NAME="${PREFIX}-rds-sg"
-          API_NAME="${PREFIX}-http-api"
-          VPC_LINK_NAME="${PREFIX}-vpc-link"
-          DB_INSTANCE_ID="${PREFIX}-db"
-
-          # Helper to get default VPC ID
-          DEFAULT_VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo "")
-
-          echo "Importing pre-existing resources where found..."
-
-          # ECR repo by name
-          if aws ecr describe-repositories --repository-names "$ECR_REPO_NAME" >/dev/null 2>&1; then
-            terraform import aws_ecr_repository.backend "$ECR_REPO_NAME" || true
-          fi
-
-          # IAM role by name
-          if aws iam get-role --role-name "$ROLE_NAME" >/dev/null 2>&1; then
-            terraform import aws_iam_role.ecs_task_execution_role "$ROLE_NAME" || true
-          fi
-
-          # CloudWatch log group by name
-          if aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP_NAME" --query "logGroups[?logGroupName=='$LOG_GROUP_NAME'] | length(@)" --output text | grep -q '^1$'; then
-            terraform import aws_cloudwatch_log_group.ecs "$LOG_GROUP_NAME" || true
-          fi
-
-          # DB subnet group by name
-          if aws rds describe-db-subnet-groups --db-subnet-group-name "$DB_SUBNET_GROUP_NAME" >/dev/null 2>&1; then
-            terraform import aws_db_subnet_group.db "$DB_SUBNET_GROUP_NAME" || true
-          fi
-
-          # Security groups by name in default VPC
-          if [ -n "$DEFAULT_VPC_ID" ]; then
-            SG_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values="$SG_TASKS_NAME" Name=vpc-id,Values="$DEFAULT_VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
-            if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then terraform import aws_security_group.ecs_tasks "$SG_ID" || true; fi
-
-            SG2_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values="$SG_VPC_LINK_NAME" Name=vpc-id,Values="$DEFAULT_VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
-            if [ -n "$SG2_ID" ] && [ "$SG2_ID" != "None" ]; then terraform import aws_security_group.vpc_link "$SG2_ID" || true; fi
-
-            SGRDS_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values="$SG_RDS_NAME" Name=vpc-id,Values="$DEFAULT_VPC_ID" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || echo "")
-            if [ -n "$SGRDS_ID" ] && [ "$SGRDS_ID" != "None" ]; then terraform import aws_security_group.rds "$SGRDS_ID" || true; fi
-          fi
-
-
-          # ECS cluster and service
-          ECS_CLUSTER_ARN=$(aws ecs describe-clusters --clusters "$ECS_CLUSTER_NAME" --query 'clusters[0].clusterArn' --output text 2>/dev/null || echo "")
-          if [ -n "$ECS_CLUSTER_ARN" ] && [ "$ECS_CLUSTER_ARN" != "None" ]; then
-            # Import cluster by NAME for compatibility
-            terraform import aws_ecs_cluster.this "$ECS_CLUSTER_NAME" || true
-            ECS_SVC_ARN=$(aws ecs describe-services --cluster "$ECS_CLUSTER_NAME" --services "$ECS_SERVICE_NAME" --query 'services[0].serviceArn' --output text 2>/dev/null || echo "")
-            if [ -n "$ECS_SVC_ARN" ] && [ "$ECS_SVC_ARN" != "None" ]; then
-              # ECS service expects import ID 'cluster-name/service-name'
-              terraform import aws_ecs_service.backend "$ECS_CLUSTER_NAME/$ECS_SERVICE_NAME" || true
-            fi
-          fi
-
-          # API Gateway HTTP API + VPC Link stack
-          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='$API_NAME'].ApiId | [0]" --output text 2>/dev/null || echo "")
-          if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
-            terraform import aws_apigatewayv2_api.http_api "$API_ID" || true
-            # Stage 'prod'
-            terraform import aws_apigatewayv2_stage.prod "$API_ID/prod" || true
-            # VPC Link by name
-            VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='$VPC_LINK_NAME'].VpcLinkId | [0]" --output text 2>/dev/null || echo "")
-            if [ -n "$VPC_LINK_ID" ] && [ "$VPC_LINK_ID" != "None" ]; then terraform import aws_apigatewayv2_vpc_link.this "$VPC_LINK_ID" || true; fi
-            # Integration
-            INT_ID=$(aws apigatewayv2 get-integrations --api-id "$API_ID" --query "Items[0].IntegrationId" --output text 2>/dev/null || echo "")
-            if [ -n "$INT_ID" ] && [ "$INT_ID" != "None" ]; then terraform import aws_apigatewayv2_integration.backend "$API_ID/$INT_ID" || true; fi
-            # Routes ANY / and ANY /{proxy+}
-            ROOT_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /'].RouteId | [0]" --output text 2>/dev/null || echo "")
-            if [ -n "$ROOT_ROUTE_ID" ] && [ "$ROOT_ROUTE_ID" != "None" ]; then terraform import aws_apigatewayv2_route.root "$API_ID/$ROOT_ROUTE_ID" || true; fi
-            PROXY_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /{proxy+}'].RouteId | [0]" --output text 2>/dev/null || echo "")
-            if [ -n "$PROXY_ROUTE_ID" ] && [ "$PROXY_ROUTE_ID" != "None" ]; then terraform import aws_apigatewayv2_route.proxy "$API_ID/$PROXY_ROUTE_ID" || true; fi
-          fi
-
-          # RDS instance by identifier (optional)
-          if aws rds describe-db-instances --db-instance-identifier "$DB_INSTANCE_ID" >/dev/null 2>&1; then
-            terraform import aws_db_instance.postgres "$DB_INSTANCE_ID" || true
-          fi
-
-          # Service Discovery service (namespace is now a data source, not managed)
-          NAMESPACE_NAME="${PREFIX}.local"
-          NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='$NAMESPACE_NAME'].Id | [0]" --output text 2>/dev/null || echo "")
-          if [ -n "$NAMESPACE_ID" ] && [ "$NAMESPACE_ID" != "None" ]; then
-            echo "Found existing namespace $NAMESPACE_NAME with ID $NAMESPACE_ID"
-            
-            # Check for existing service to import
-            SERVICE_ID=$(aws servicediscovery list-services --query "Services[?Name=='backend' && NamespaceId=='$NAMESPACE_ID'].Id | [0]" --output text 2>/dev/null || echo "")
-            if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "None" ]; then
-              echo "Importing existing service backend with ID $SERVICE_ID"
-              terraform import aws_service_discovery_service.backend "$SERVICE_ID" || true
-            fi
-          else
-            echo "WARNING: Namespace $NAMESPACE_NAME not found. The data source will fail."
-          fi
-      - name: Prepare optional TF vars
-        run: |
-          # Only set AZ exclusions if provided; otherwise let TF default [] apply
-          VAL='${{ secrets.VPC_LINK_EXCLUDED_AZ_IDS }}'
-          if [ -n "$VAL" ]; then echo "TF_VAR_apigw_excluded_az_ids=$VAL" >> $GITHUB_ENV; fi
-          # Only set redis_url if provided; otherwise let TF use safe default
-          RVAL='${{ secrets.REDIS_URL }}'
-          if [ -n "$RVAL" ]; then echo "TF_VAR_redis_url=$RVAL" >> $GITHUB_ENV; fi
-      - name: Terraform Apply (full infra)
-        working-directory: infrastructure/terraform
-        env:
-          TF_INPUT: "false"
           TF_VAR_aws_region: ${{ env.AWS_REGION }}
           TF_VAR_project: journalai
           TF_VAR_environment: dev
@@ -323,7 +193,38 @@ jobs:
           TF_VAR_secret_key: ${{ secrets.SECRET_KEY }}
           TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
-        run: terraform apply -auto-approve
+          TF_INPUT: "false"
+          PROJECT: journalai
+          ENVIRONMENT: dev
+        run: |
+          echo "Running Terraform plan to check for imports and changes..."
+          
+          # Make import script executable
+          chmod +x scripts/import-existing.sh
+          
+          # Run the import script for dynamic resources (Service Discovery, Security Groups, API Gateway)
+          ./scripts/import-existing.sh || echo "Some imports may have failed, continuing..."
+          
+          # Run terraform plan - imports defined in imports.tf will be processed automatically
+          terraform plan -out=tfplan
+          
+          echo "Plan complete. Imports and changes are ready to apply."
+      - name: Prepare optional TF vars
+        run: |
+          # Only set AZ exclusions if provided; otherwise let TF default [] apply
+          VAL='${{ secrets.VPC_LINK_EXCLUDED_AZ_IDS }}'
+          if [ -n "$VAL" ]; then echo "TF_VAR_apigw_excluded_az_ids=$VAL" >> $GITHUB_ENV; fi
+          # Only set redis_url if provided; otherwise let TF use safe default
+          RVAL='${{ secrets.REDIS_URL }}'
+          if [ -n "$RVAL" ]; then echo "TF_VAR_redis_url=$RVAL" >> $GITHUB_ENV; fi
+      - name: Terraform Apply
+        working-directory: infrastructure/terraform
+        env:
+          TF_INPUT: "false"
+        run: |
+          # Apply the plan created in the previous step
+          # This will handle all imports and resource changes
+          terraform apply tfplan
       - name: Read API URL
         id: api-url
         working-directory: infrastructure/terraform

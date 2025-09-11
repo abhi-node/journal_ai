@@ -18,8 +18,208 @@ env:
   ENVIRONMENT: dev
 
 jobs:
+  # TEMPORARY: Remove this job after infrastructure is stable
+  destroy-all:
+    name: Destroy Existing Infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Force Delete All Resources
+        run: |
+          set +e  # Continue on errors
+          echo "========================================"
+          echo "DESTROYING ALL EXISTING INFRASTRUCTURE"
+          echo "========================================"
+          
+          VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
+          echo "VPC ID: $VPC_ID"
+          
+          # 1. Delete ECS Service first (must be done before other resources)
+          echo ">>> Deleting ECS Service..."
+          aws ecs update-service --cluster journalai-dev-cluster --service journalai-dev-service --desired-count 0 2>/dev/null
+          sleep 10
+          aws ecs delete-service --cluster journalai-dev-cluster --service journalai-dev-service --force 2>/dev/null
+          
+          # Stop all running tasks
+          echo ">>> Stopping all ECS tasks..."
+          TASK_ARNS=$(aws ecs list-tasks --cluster journalai-dev-cluster --query 'taskArns[]' --output text 2>/dev/null)
+          for TASK in $TASK_ARNS; do 
+            echo "Stopping task: $TASK"
+            aws ecs stop-task --cluster journalai-dev-cluster --task "$TASK" 2>/dev/null
+          done
+          sleep 10
+          
+          # 2. Delete Service Discovery (must deregister instances first)
+          echo ">>> Deleting Service Discovery..."
+          NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='journalai-dev.local'].Id | [0]" --output text 2>/dev/null)
+          if [ -n "$NAMESPACE_ID" ] && [ "$NAMESPACE_ID" != "None" ]; then
+            echo "Found namespace: $NAMESPACE_ID"
+            SERVICE_ID=$(aws servicediscovery list-services --filters "Name=NAMESPACE_ID,Values=$NAMESPACE_ID" --query "Services[?Name=='backend'].Id | [0]" --output text 2>/dev/null)
+            if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "None" ]; then
+              echo "Found service: $SERVICE_ID"
+              # Deregister all instances
+              INSTANCES=$(aws servicediscovery list-instances --service-id "$SERVICE_ID" --query 'Instances[].Id' --output text 2>/dev/null)
+              for INSTANCE_ID in $INSTANCES; do
+                echo "Deregistering instance: $INSTANCE_ID"
+                aws servicediscovery deregister-instance --service-id "$SERVICE_ID" --instance-id "$INSTANCE_ID" 2>/dev/null
+              done
+              sleep 5
+              aws servicediscovery delete-service --id "$SERVICE_ID" 2>/dev/null
+              echo "Deleted service"
+            fi
+            sleep 5
+            aws servicediscovery delete-namespace --id "$NAMESPACE_ID" 2>/dev/null
+            echo "Deleted namespace"
+          fi
+          
+          # 3. Delete API Gateway components
+          echo ">>> Deleting API Gateway..."
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text 2>/dev/null)
+          if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
+            echo "Found API: $API_ID"
+            # Delete routes
+            for ROUTE_ID in $(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[].RouteId" --output text 2>/dev/null); do
+              aws apigatewayv2 delete-route --api-id "$API_ID" --route-id "$ROUTE_ID" 2>/dev/null
+            done
+            # Delete integrations
+            for INT_ID in $(aws apigatewayv2 get-integrations --api-id "$API_ID" --query "Items[].IntegrationId" --output text 2>/dev/null); do
+              aws apigatewayv2 delete-integration --api-id "$API_ID" --integration-id "$INT_ID" 2>/dev/null
+            done
+            # Delete stages
+            aws apigatewayv2 delete-stage --api-id "$API_ID" --stage-name prod 2>/dev/null
+            # Delete API
+            aws apigatewayv2 delete-api --api-id "$API_ID" 2>/dev/null
+            echo "Deleted API Gateway"
+          fi
+          
+          # 4. Delete VPC Link (wait for it to be deleted)
+          echo ">>> Deleting VPC Link..."
+          VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='journalai-dev-vpc-link'].VpcLinkId | [0]" --output text 2>/dev/null)
+          if [ -n "$VPC_LINK_ID" ] && [ "$VPC_LINK_ID" != "None" ]; then
+            echo "Found VPC Link: $VPC_LINK_ID"
+            aws apigatewayv2 delete-vpc-link --vpc-link-id "$VPC_LINK_ID" 2>/dev/null
+            # Wait for VPC Link to be deleted (important for security groups)
+            for i in {1..30}; do
+              STATUS=$(aws apigatewayv2 get-vpc-link --vpc-link-id "$VPC_LINK_ID" --query 'VpcLinkStatus' --output text 2>/dev/null)
+              if [ -z "$STATUS" ] || [ "$STATUS" = "None" ]; then
+                echo "VPC Link deleted"
+                break
+              fi
+              echo "VPC Link status: $STATUS, waiting..."
+              sleep 5
+            done
+          fi
+          
+          # 5. Delete ECS Cluster
+          echo ">>> Deleting ECS Cluster..."
+          aws ecs delete-cluster --cluster journalai-dev-cluster 2>/dev/null
+          echo "Deleted ECS Cluster"
+          
+          # 6. Deregister Task Definitions
+          echo ">>> Deregistering Task Definitions..."
+          TASK_DEF_ARNS=$(aws ecs list-task-definitions --family-prefix journalai-dev --query 'taskDefinitionArns[]' --output text 2>/dev/null)
+          for TASK_DEF in $TASK_DEF_ARNS; do
+            aws ecs deregister-task-definition --task-definition "$TASK_DEF" 2>/dev/null
+          done
+          
+          # 7. Delete CloudWatch Log Group
+          echo ">>> Deleting CloudWatch Logs..."
+          aws logs delete-log-group --log-group-name /ecs/journalai-dev-service 2>/dev/null
+          echo "Deleted CloudWatch Log Group"
+          
+          # 8. Delete ECR Repository
+          echo ">>> Force Deleting ECR Repository..."
+          aws ecr delete-repository --repository-name journalai-dev-backend --force 2>/dev/null
+          echo "Deleted ECR Repository"
+          
+          # 9. Delete RDS Instance (and wait for completion)
+          echo ">>> Deleting RDS Instance..."
+          aws rds delete-db-instance --db-instance-identifier journalai-dev-db --skip-final-snapshot --delete-automated-backups 2>/dev/null
+          if [ $? -eq 0 ]; then
+            echo "RDS deletion initiated, waiting..."
+            for i in {1..60}; do
+              STATUS=$(aws rds describe-db-instances --db-instance-identifier journalai-dev-db --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null)
+              if [ -z "$STATUS" ] || [ "$STATUS" = "None" ]; then
+                echo "RDS instance deleted"
+                break
+              fi
+              echo "RDS status: $STATUS (attempt $i/60)"
+              sleep 10
+            done
+          fi
+          
+          # 10. Delete DB Subnet Group
+          echo ">>> Deleting DB Subnet Group..."
+          aws rds delete-db-subnet-group --db-subnet-group-name journalai-dev-db-subnets 2>/dev/null
+          echo "Deleted DB Subnet Group"
+          
+          # 11. Delete Security Groups
+          echo ">>> Deleting Security Groups..."
+          for SG_NAME in journalai-dev-ecs-tasks-sg journalai-dev-apigw-vpc-link-sg journalai-dev-rds-sg; do
+            echo "Processing security group: $SG_NAME"
+            SG_ID=$(aws ec2 describe-security-groups \
+              --filters "Name=group-name,Values=$SG_NAME" "Name=vpc-id,Values=$VPC_ID" \
+              --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+            
+            if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+              echo "Found security group $SG_NAME with ID: $SG_ID"
+              
+              # Remove all rules referencing this security group
+              ALL_SGS=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[].GroupId' --output text)
+              for OTHER_SG in $ALL_SGS; do
+                if [ "$OTHER_SG" != "$SG_ID" ]; then
+                  aws ec2 revoke-security-group-ingress --group-id "$OTHER_SG" --source-group "$SG_ID" --protocol all 2>/dev/null
+                  aws ec2 revoke-security-group-egress --group-id "$OTHER_SG" --source-group "$SG_ID" --protocol all 2>/dev/null
+                fi
+              done
+              
+              # Remove all ingress rules
+              INGRESS=$(aws ec2 describe-security-groups --group-ids "$SG_ID" --query 'SecurityGroups[0].IpPermissions' --output json 2>/dev/null)
+              if [ "$INGRESS" != "[]" ] && [ "$INGRESS" != "null" ] && [ -n "$INGRESS" ]; then
+                aws ec2 revoke-security-group-ingress --group-id "$SG_ID" --ip-permissions "$INGRESS" 2>/dev/null
+              fi
+              
+              # Remove all egress rules
+              EGRESS=$(aws ec2 describe-security-groups --group-ids "$SG_ID" --query 'SecurityGroups[0].IpPermissionsEgress' --output json 2>/dev/null)
+              if [ "$EGRESS" != "[]" ] && [ "$EGRESS" != "null" ] && [ -n "$EGRESS" ]; then
+                aws ec2 revoke-security-group-egress --group-id "$SG_ID" --ip-permissions "$EGRESS" 2>/dev/null
+              fi
+              
+              sleep 2
+              aws ec2 delete-security-group --group-id "$SG_ID" 2>/dev/null
+              if [ $? -eq 0 ]; then
+                echo "Successfully deleted security group: $SG_NAME"
+              else
+                echo "Failed to delete security group: $SG_NAME (may be in use)"
+              fi
+            else
+              echo "Security group $SG_NAME not found"
+            fi
+          done
+          
+          # 12. Delete IAM Role
+          echo ">>> Deleting IAM Role..."
+          ATTACHED_POLICIES=$(aws iam list-attached-role-policies --role-name journalai-dev-ecsTaskExecutionRole --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null)
+          for POLICY_ARN in $ATTACHED_POLICIES; do
+            aws iam detach-role-policy --role-name journalai-dev-ecsTaskExecutionRole --policy-arn "$POLICY_ARN" 2>/dev/null
+          done
+          aws iam delete-role --role-name journalai-dev-ecsTaskExecutionRole 2>/dev/null
+          echo "Deleted IAM Role"
+          
+          echo "========================================"
+          echo "DESTRUCTION COMPLETE"
+          echo "========================================"
+
   infrastructure:
     name: Provision Infrastructure
+    needs: destroy-all  # Remove this dependency after first successful run
     runs-on: ubuntu-latest
     outputs:
       ecr_repository_url: ${{ steps.outputs.outputs.ecr_repository_url }}

@@ -22,8 +22,9 @@ resource "aws_apigatewayv2_integration" "backend" {
   connection_id          = aws_apigatewayv2_vpc_link.this.id
   integration_method     = "ANY"
   payload_format_version = "1.0"
-  # Direct connection to ECS service via service discovery - must use the ARN
-  integration_uri      = aws_service_discovery_service.backend.arn
+  # Use HTTP URL format for Service Discovery endpoint
+  # Format: http://{service-name}.{namespace}:{port}
+  integration_uri      = "http://backend.${var.project}-${var.environment}.local:8000"
   timeout_milliseconds = 30000
 }
 

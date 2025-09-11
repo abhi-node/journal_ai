@@ -530,39 +530,116 @@ jobs:
       
       - name: Update ECS Service
         run: |
+          echo "========================================="
+          echo "UPDATING ECS SERVICE"
+          echo "========================================="
+          
+          # Get ECR URL - fallback to AWS query if not provided
+          ECR_URL="${{ needs.infrastructure.outputs.ecr_repository_url }}"
+          if [ -z "$ECR_URL" ] || [ "$ECR_URL" = "" ]; then
+            echo "ECR URL not provided from infrastructure job, fetching from AWS..."
+            ECR_URL=$(aws ecr describe-repositories \
+              --repository-names journalai-dev-backend \
+              --query 'repositories[0].repositoryUri' \
+              --output text)
+          fi
+          
+          IMAGE_TAG="${{ needs.build.outputs.image_tag }}"
+          
+          echo "ECR Repository: $ECR_URL"
+          echo "Image Tag: $IMAGE_TAG"
+          
+          if [ -z "$ECR_URL" ] || [ -z "$IMAGE_TAG" ]; then
+            echo "ERROR: Missing ECR URL or image tag!"
+            exit 1
+          fi
+          
+          FULL_IMAGE="${ECR_URL}:${IMAGE_TAG}"
+          echo "Full Image URI: $FULL_IMAGE"
+          echo ""
+          
           # Get current task definition
+          echo "Fetching current task definition..."
           TASK_DEFINITION=$(aws ecs describe-task-definition \
             --task-definition ${{ needs.infrastructure.outputs.ecs_task_family }} \
             --query 'taskDefinition' \
             --output json)
           
-          # Update the image in container definitions (backend, celery_worker, celery_beat)
-          NEW_TASK_DEF=$(echo $TASK_DEFINITION | \
-            jq --arg IMAGE "${{ needs.infrastructure.outputs.ecr_repository_url }}:${{ needs.build.outputs.image_tag }}" \
-            '.containerDefinitions[0].image = $IMAGE | .containerDefinitions[2].image = $IMAGE | .containerDefinitions[3].image = $IMAGE')
+          if [ -z "$TASK_DEFINITION" ] || [ "$TASK_DEFINITION" = "null" ]; then
+            echo "ERROR: Could not retrieve task definition!"
+            exit 1
+          fi
+          
+          # Debug: Show container names and current images
+          echo "Current container definitions:"
+          echo "$TASK_DEFINITION" | jq -r '.containerDefinitions[] | "\(.name): \(.image)"'
+          echo ""
+          
+          # Update images for all containers that use the backend image
+          # This updates backend, celery_worker, and celery_beat containers by name
+          echo "Updating container images..."
+          NEW_TASK_DEF=$(echo "$TASK_DEFINITION" | jq --arg IMAGE "$FULL_IMAGE" '
+            .containerDefinitions |= map(
+              if .name == "backend" or .name == "celery_worker" or .name == "celery_beat" 
+              then .image = $IMAGE 
+              else . 
+              end
+            )
+          ')
           
           # Remove fields that can't be in register request
-          NEW_TASK_DEF=$(echo $NEW_TASK_DEF | \
-            jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)')
+          echo "Cleaning task definition for registration..."
+          NEW_TASK_DEF=$(echo "$NEW_TASK_DEF" | jq '
+            del(.taskDefinitionArn, .revision, .status, .requiresAttributes, 
+                .compatibilities, .registeredAt, .registeredBy, .requiresCompatibilities)
+          ')
+          
+          # Debug: Verify the JSON is valid
+          echo "Validating JSON..."
+          echo "$NEW_TASK_DEF" | jq empty || {
+            echo "ERROR: Invalid JSON generated!"
+            echo "JSON content:"
+            echo "$NEW_TASK_DEF"
+            exit 1
+          }
+          
+          # Save to temp file for debugging if needed
+          echo "$NEW_TASK_DEF" > /tmp/task-definition.json
           
           # Register new task definition
-          NEW_TASK_ARN=$(echo $NEW_TASK_DEF | \
-            aws ecs register-task-definition --cli-input-json file:///dev/stdin \
-            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "Registering new task definition..."
+          NEW_TASK_ARN=$(aws ecs register-task-definition \
+            --cli-input-json "$NEW_TASK_DEF" \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
           
-          echo "New task definition: $NEW_TASK_ARN"
+          if [ -z "$NEW_TASK_ARN" ] || [ "$NEW_TASK_ARN" = "None" ]; then
+            echo "ERROR: Failed to register task definition!"
+            echo "Task definition content saved to /tmp/task-definition.json"
+            exit 1
+          fi
+          
+          echo "✅ New task definition registered: $NEW_TASK_ARN"
+          echo ""
           
           # Update service with new task definition
+          echo "Updating ECS service..."
           aws ecs update-service \
             --cluster ${{ needs.infrastructure.outputs.ecs_cluster_name }} \
             --service ${{ needs.infrastructure.outputs.ecs_service_name }} \
-            --task-definition $NEW_TASK_ARN \
+            --task-definition "$NEW_TASK_ARN" \
             --force-new-deployment
           
+          echo "✅ Service update initiated"
+          echo ""
+          
           # Wait for service to stabilize
+          echo "Waiting for service to stabilize..."
           aws ecs wait services-stable \
             --cluster ${{ needs.infrastructure.outputs.ecs_cluster_name }} \
             --services ${{ needs.infrastructure.outputs.ecs_service_name }}
+          
+          echo "✅ Service deployment complete!"
 
   health-check:
     name: Comprehensive Health Verification

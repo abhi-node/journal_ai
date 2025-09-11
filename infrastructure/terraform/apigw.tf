@@ -49,6 +49,16 @@ output "api_gateway_invoke_url" {
   value = "https://${aws_apigatewayv2_api.http_api.id}.execute-api.${var.aws_region}.amazonaws.com/prod"
 }
 
+output "api_gateway_id" {
+  value = aws_apigatewayv2_api.http_api.id
+  description = "ID of the API Gateway"
+}
+
+output "vpc_link_id" {
+  value = aws_apigatewayv2_vpc_link.this.id
+  description = "ID of the VPC Link"
+}
+
 # Build filtered subnet list for VPC Link (exclude unsupported AZ IDs if provided)
 data "aws_subnet" "default_subnets" {
   for_each = toset(data.aws_subnets.default.ids)

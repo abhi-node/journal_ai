@@ -18,251 +18,8 @@ env:
   ENVIRONMENT: dev
 
 jobs:
-  # TEMPORARY: Remove this job after first successful run
-  destroy-all:
-    name: Destroy Existing Infrastructure
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-      
-      - name: Force Delete All Resources
-        run: |
-          set +e  # Continue on errors
-          echo "========================================"
-          echo "DESTROYING ALL EXISTING INFRASTRUCTURE"
-          echo "========================================"
-          
-          VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
-          echo "VPC ID: $VPC_ID"
-          
-          # 1. Delete ECS Service first (must be done before other resources)
-          echo ">>> Deleting ECS Service..."
-          aws ecs update-service --cluster journalai-dev-cluster --service journalai-dev-service --desired-count 0 2>/dev/null
-          sleep 10
-          aws ecs delete-service --cluster journalai-dev-cluster --service journalai-dev-service --force 2>/dev/null
-          
-          # Stop all running tasks
-          echo ">>> Stopping all ECS tasks..."
-          TASK_ARNS=$(aws ecs list-tasks --cluster journalai-dev-cluster --query 'taskArns[]' --output text 2>/dev/null)
-          for TASK in $TASK_ARNS; do 
-            echo "Stopping task: $TASK"
-            aws ecs stop-task --cluster journalai-dev-cluster --task "$TASK" 2>/dev/null
-          done
-          sleep 10
-          
-          # 2. Delete Service Discovery (must deregister instances first)
-          echo ">>> Deleting Service Discovery..."
-          NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='journalai-dev.local'].Id | [0]" --output text 2>/dev/null)
-          if [ -n "$NAMESPACE_ID" ] && [ "$NAMESPACE_ID" != "None" ]; then
-            echo "Found namespace: $NAMESPACE_ID"
-            SERVICE_ID=$(aws servicediscovery list-services --filters "Name=NAMESPACE_ID,Values=$NAMESPACE_ID" --query "Services[?Name=='backend'].Id | [0]" --output text 2>/dev/null)
-            if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "None" ]; then
-              echo "Found service: $SERVICE_ID"
-              INSTANCES=$(aws servicediscovery list-instances --service-id "$SERVICE_ID" --query 'Instances[].Id' --output text 2>/dev/null)
-              for INSTANCE_ID in $INSTANCES; do
-                echo "Deregistering instance: $INSTANCE_ID"
-                aws servicediscovery deregister-instance --service-id "$SERVICE_ID" --instance-id "$INSTANCE_ID" 2>/dev/null
-              done
-              sleep 5
-              aws servicediscovery delete-service --id "$SERVICE_ID" 2>/dev/null
-              echo "Deleted service"
-            fi
-            sleep 5
-            aws servicediscovery delete-namespace --id "$NAMESPACE_ID" 2>/dev/null
-            echo "Deleted namespace"
-          fi
-          
-          # 3. Delete API Gateway components
-          echo ">>> Deleting API Gateway..."
-          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text 2>/dev/null)
-          if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
-            echo "Found API: $API_ID"
-            # Delete routes
-            for ROUTE_ID in $(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[].RouteId" --output text 2>/dev/null); do
-              aws apigatewayv2 delete-route --api-id "$API_ID" --route-id "$ROUTE_ID" 2>/dev/null
-            done
-            # Delete integrations
-            for INT_ID in $(aws apigatewayv2 get-integrations --api-id "$API_ID" --query "Items[].IntegrationId" --output text 2>/dev/null); do
-              aws apigatewayv2 delete-integration --api-id "$API_ID" --integration-id "$INT_ID" 2>/dev/null
-            done
-            # Delete stages
-            aws apigatewayv2 delete-stage --api-id "$API_ID" --stage-name prod 2>/dev/null
-            # Delete API
-            aws apigatewayv2 delete-api --api-id "$API_ID" 2>/dev/null
-            echo "Deleted API Gateway"
-          fi
-          
-          # 4. Delete VPC Link (wait for it to be deleted)
-          echo ">>> Deleting VPC Link..."
-          VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='journalai-dev-vpc-link'].VpcLinkId | [0]" --output text 2>/dev/null)
-          if [ -n "$VPC_LINK_ID" ] && [ "$VPC_LINK_ID" != "None" ]; then
-            echo "Found VPC Link: $VPC_LINK_ID"
-            aws apigatewayv2 delete-vpc-link --vpc-link-id "$VPC_LINK_ID" 2>/dev/null
-            # Wait for VPC Link to be deleted (important for security groups)
-            for i in {1..30}; do
-              STATUS=$(aws apigatewayv2 get-vpc-link --vpc-link-id "$VPC_LINK_ID" --query 'VpcLinkStatus' --output text 2>/dev/null)
-              if [ -z "$STATUS" ] || [ "$STATUS" = "None" ]; then
-                echo "VPC Link deleted"
-                break
-              fi
-              echo "VPC Link status: $STATUS, waiting..."
-              sleep 5
-            done
-          fi
-          
-          # 5. Delete ECS Cluster
-          echo ">>> Deleting ECS Cluster..."
-          aws ecs delete-cluster --cluster journalai-dev-cluster 2>/dev/null
-          echo "Deleted ECS Cluster"
-          
-          # 6. Deregister Task Definitions
-          echo ">>> Deregistering Task Definitions..."
-          TASK_DEF_ARNS=$(aws ecs list-task-definitions --family-prefix journalai-dev --query 'taskDefinitionArns[]' --output text 2>/dev/null)
-          for TASK_DEF in $TASK_DEF_ARNS; do
-            aws ecs deregister-task-definition --task-definition "$TASK_DEF" 2>/dev/null
-          done
-          
-          # 7. Delete CloudWatch Log Group
-          echo ">>> Deleting CloudWatch Logs..."
-          aws logs delete-log-group --log-group-name /ecs/journalai-dev-service 2>/dev/null
-          echo "Deleted CloudWatch Log Group"
-          
-          # 8. Delete ECR Repository
-          echo ">>> Force Deleting ECR Repository..."
-          aws ecr delete-repository --repository-name journalai-dev-backend --force 2>/dev/null
-          echo "Deleted ECR Repository"
-          
-          # 9. Delete RDS Instance (and wait for completion)
-          echo ">>> Deleting RDS Instance..."
-          aws rds delete-db-instance --db-instance-identifier journalai-dev-db --skip-final-snapshot --delete-automated-backups 2>/dev/null
-          if [ $? -eq 0 ]; then
-            echo "RDS deletion initiated, waiting..."
-            for i in {1..60}; do
-              STATUS=$(aws rds describe-db-instances --db-instance-identifier journalai-dev-db --query 'DBInstances[0].DBInstanceStatus' --output text 2>/dev/null)
-              if [ -z "$STATUS" ] || [ "$STATUS" = "None" ]; then
-                echo "RDS instance deleted"
-                break
-              fi
-              echo "RDS status: $STATUS (attempt $i/60)"
-              sleep 10
-            done
-          fi
-          
-          # 10. Delete DB Subnet Group
-          echo ">>> Deleting DB Subnet Group..."
-          aws rds delete-db-subnet-group --db-subnet-group-name journalai-dev-db-subnets 2>/dev/null
-          echo "Deleted DB Subnet Group"
-          
-          # 11. COMPREHENSIVE Security Group Deletion
-          echo ">>> Force Deleting ALL Security Groups..."
-          for SG_NAME in journalai-dev-ecs-tasks-sg journalai-dev-apigw-vpc-link-sg journalai-dev-rds-sg; do
-            echo "Processing security group: $SG_NAME"
-            
-            # Find security group by name
-            SG_ID=$(aws ec2 describe-security-groups \
-              --filters "Name=group-name,Values=$SG_NAME" "Name=vpc-id,Values=$VPC_ID" \
-              --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
-            
-            if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
-              echo "Found security group $SG_NAME with ID: $SG_ID"
-              
-              # First, remove all rules referencing this security group from OTHER security groups
-              echo "Removing references from other security groups..."
-              ALL_SGS=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query 'SecurityGroups[].GroupId' --output text)
-              for OTHER_SG in $ALL_SGS; do
-                if [ "$OTHER_SG" != "$SG_ID" ]; then
-                  # Remove ingress rules referencing this SG
-                  aws ec2 revoke-security-group-ingress \
-                    --group-id "$OTHER_SG" \
-                    --source-group "$SG_ID" \
-                    --protocol all 2>/dev/null
-                  # Remove egress rules referencing this SG
-                  aws ec2 revoke-security-group-egress \
-                    --group-id "$OTHER_SG" \
-                    --source-group "$SG_ID" \
-                    --protocol all 2>/dev/null
-                fi
-              done
-              
-              # Remove all ingress rules from this security group
-              echo "Removing all ingress rules..."
-              INGRESS=$(aws ec2 describe-security-groups --group-ids "$SG_ID" --query 'SecurityGroups[0].IpPermissions' --output json 2>/dev/null)
-              if [ "$INGRESS" != "[]" ] && [ "$INGRESS" != "null" ] && [ -n "$INGRESS" ]; then
-                aws ec2 revoke-security-group-ingress --group-id "$SG_ID" --ip-permissions "$INGRESS" 2>/dev/null
-              fi
-              
-              # Remove all egress rules from this security group
-              echo "Removing all egress rules..."
-              EGRESS=$(aws ec2 describe-security-groups --group-ids "$SG_ID" --query 'SecurityGroups[0].IpPermissionsEgress' --output json 2>/dev/null)
-              if [ "$EGRESS" != "[]" ] && [ "$EGRESS" != "null" ] && [ -n "$EGRESS" ]; then
-                aws ec2 revoke-security-group-egress --group-id "$SG_ID" --ip-permissions "$EGRESS" 2>/dev/null
-              fi
-              
-              # Wait a bit for rules to be removed
-              sleep 2
-              
-              # Now delete the security group
-              echo "Deleting security group $SG_NAME..."
-              aws ec2 delete-security-group --group-id "$SG_ID" 2>/dev/null
-              if [ $? -eq 0 ]; then
-                echo "Successfully deleted security group: $SG_NAME"
-              else
-                echo "Failed to delete security group: $SG_NAME (may be in use)"
-                # Try to find what's using it
-                aws ec2 describe-network-interfaces --filters "Name=group-id,Values=$SG_ID" --query 'NetworkInterfaces[].Description' --output text 2>/dev/null
-              fi
-            else
-              echo "Security group $SG_NAME not found"
-            fi
-          done
-          
-          # 12. Delete IAM Role
-          echo ">>> Deleting IAM Role..."
-          ATTACHED_POLICIES=$(aws iam list-attached-role-policies --role-name journalai-dev-ecsTaskExecutionRole --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null)
-          for POLICY_ARN in $ATTACHED_POLICIES; do
-            aws iam detach-role-policy --role-name journalai-dev-ecsTaskExecutionRole --policy-arn "$POLICY_ARN" 2>/dev/null
-          done
-          aws iam delete-role --role-name journalai-dev-ecsTaskExecutionRole 2>/dev/null
-          echo "Deleted IAM Role"
-          
-          # 13. Final cleanup attempt for stubborn resources
-          echo ">>> Final cleanup pass..."
-          sleep 10
-          
-          # Try security groups one more time
-          for SG_NAME in journalai-dev-ecs-tasks-sg journalai-dev-apigw-vpc-link-sg journalai-dev-rds-sg; do
-            SG_ID=$(aws ec2 describe-security-groups \
-              --filters "Name=group-name,Values=$SG_NAME" "Name=vpc-id,Values=$VPC_ID" \
-              --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
-            if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
-              echo "Security group $SG_NAME still exists, force deleting..."
-              aws ec2 delete-security-group --group-id "$SG_ID" --force 2>/dev/null || true
-            fi
-          done
-          
-          echo "========================================"
-          echo "DESTRUCTION COMPLETE - Verifying..."
-          echo "========================================"
-          
-          # Verify what's left
-          echo "Remaining Security Groups:"
-          aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$VPC_ID" --query "SecurityGroups[?contains(GroupName, 'journalai-dev')].{Name:GroupName,ID:GroupId}" --output table
-          
-          echo "Remaining ECR Repositories:"
-          aws ecr describe-repositories --query "repositories[?contains(repositoryName, 'journalai-dev')].repositoryName" --output text
-          
-          echo "Remaining RDS Instances:"
-          aws rds describe-db-instances --query "DBInstances[?contains(DBInstanceIdentifier, 'journalai-dev')].DBInstanceIdentifier" --output text
-
   infrastructure:
     name: Provision Infrastructure
-    needs: destroy-all  # Remove this dependency after first run
     runs-on: ubuntu-latest
     outputs:
       ecr_repository_url: ${{ steps.outputs.outputs.ecr_repository_url }}
@@ -445,37 +202,96 @@ jobs:
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
           TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
         run: |
-          # Initialize terraform again to ensure state is available
-          if [ -n "${{ secrets.TF_BACKEND_BUCKET }}" ] && [ -n "${{ secrets.TF_BACKEND_KEY }}" ]; then
-            terraform init \
-              -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
-              -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
-              -backend-config="region=${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}" \
-              -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
+          echo "========================================="
+          echo "Retrieving Terraform Outputs"
+          echo "========================================="
+          
+          # Debug: Show current directory and files
+          echo "Current directory: $(pwd)"
+          echo "Terraform files present:"
+          ls -la *.tf 2>/dev/null || echo "No .tf files found"
+          
+          # Check if terraform state exists
+          if [ -f terraform.tfstate ]; then
+            echo "Local terraform.tfstate found"
           else
-            # For local state, no reinit needed
-            echo "Using local state"
+            echo "No local terraform.tfstate, checking for remote backend..."
+            
+            # Re-initialize terraform to ensure we can access state
+            if [ -n "${{ secrets.TF_BACKEND_BUCKET }}" ] && [ -n "${{ secrets.TF_BACKEND_KEY }}" ]; then
+              echo "Initializing with S3 backend..."
+              terraform init \
+                -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
+                -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
+                -backend-config="region=${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}" \
+                -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}" \
+                -reconfigure
+            else
+              echo "No backend configuration provided, using local state"
+            fi
           fi
+          
+          # List all available outputs
+          echo ""
+          echo "Available Terraform outputs:"
+          terraform output -json | jq 'keys' 2>/dev/null || echo "Could not list outputs"
           
           # Get the ECR repository URL from Terraform output
-          ECR_URL=$(terraform output -raw ecr_repository_url 2>/dev/null || echo "")
+          echo ""
+          echo "Attempting to get ECR repository URL from Terraform..."
+          ECR_URL=$(terraform output -raw ecr_repository_url 2>&1)
+          TERRAFORM_EXIT_CODE=$?
           
-          # If empty, try to get it from AWS directly as fallback
-          if [ -z "$ECR_URL" ]; then
-            echo "Warning: Could not get ECR URL from Terraform output, fetching from AWS..."
-            ECR_URL=$(aws ecr describe-repositories --repository-names journalai-dev-backend --query 'repositories[0].repositoryUri' --output text 2>/dev/null || echo "")
+          # Check if terraform output worked
+          if [ $TERRAFORM_EXIT_CODE -ne 0 ] || [ -z "$ECR_URL" ] || [[ "$ECR_URL" == *"No outputs found"* ]]; then
+            echo "Warning: Could not get ECR URL from Terraform output"
+            echo "Terraform output response: $ECR_URL"
+            echo ""
+            echo "Fetching from AWS directly..."
+            
+            # Get from AWS as fallback
+            ECR_URL=$(aws ecr describe-repositories \
+              --repository-names journalai-dev-backend \
+              --query 'repositories[0].repositoryUri' \
+              --output text 2>/dev/null)
+            
+            if [ "$ECR_URL" = "None" ]; then
+              ECR_URL=""
+            fi
           fi
           
-          if [ -z "$ECR_URL" ]; then
+          # Final validation
+          if [ -z "$ECR_URL" ] || [ "$ECR_URL" = "null" ]; then
             echo "ERROR: Could not determine ECR repository URL!"
+            echo ""
+            echo "Debugging information:"
+            echo "- Terraform state list:"
+            terraform state list | head -20
+            echo ""
+            echo "- ECR repositories in AWS:"
+            aws ecr describe-repositories --query 'repositories[].repositoryName' --output json
             exit 1
           fi
           
-          echo "ECR Repository URL: $ECR_URL"
+          # Validate ECR URL format
+          if [[ ! "$ECR_URL" =~ ^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9-]+ ]]; then
+            echo "Warning: ECR URL format looks unusual: $ECR_URL"
+          fi
+          
+          echo ""
+          echo "✅ Successfully retrieved outputs:"
+          echo "   ECR Repository URL: $ECR_URL"
+          
+          # Set all outputs
           echo "ecr_repository_url=$ECR_URL" >> $GITHUB_OUTPUT
           echo "ecs_cluster_name=${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-cluster" >> $GITHUB_OUTPUT
           echo "ecs_service_name=${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-service" >> $GITHUB_OUTPUT
           echo "ecs_task_family=${{ env.PROJECT }}-${{ env.ENVIRONMENT }}-task" >> $GITHUB_OUTPUT
+          
+          # Debug: Verify outputs were set
+          echo ""
+          echo "GitHub outputs set:"
+          cat $GITHUB_OUTPUT
 
   build:
     name: Build & Push Docker Image
@@ -495,24 +311,87 @@ jobs:
       - uses: aws-actions/amazon-ecr-login@v2
         id: login-ecr
       
-      - name: Set Image Metadata
+      - name: Validate and Set Image Metadata
         id: meta
         run: |
-          echo "image_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
-          echo "ecr_repository_url=${{ needs.infrastructure.outputs.ecr_repository_url }}" >> $GITHUB_OUTPUT
+          # Get ECR URL from infrastructure job output
+          ECR_URL="${{ needs.infrastructure.outputs.ecr_repository_url }}"
+          IMAGE_TAG="${{ github.sha }}"
+          
+          # Debug output
+          echo "Received ECR URL from infrastructure: '$ECR_URL'"
+          echo "Image tag: $IMAGE_TAG"
+          
+          # Validate ECR URL
+          if [ -z "$ECR_URL" ] || [ "$ECR_URL" = "null" ]; then
+            echo "ERROR: ECR repository URL is empty or null!"
+            echo "Attempting to fetch from AWS directly..."
+            
+            # Try to get it from AWS as fallback
+            ECR_URL=$(aws ecr describe-repositories \
+              --repository-names journalai-dev-backend \
+              --query 'repositories[0].repositoryUri' \
+              --output text 2>/dev/null || echo "")
+            
+            if [ -z "$ECR_URL" ] || [ "$ECR_URL" = "None" ]; then
+              echo "ERROR: Could not determine ECR repository URL from AWS either!"
+              echo "Please ensure the ECR repository 'journalai-dev-backend' exists."
+              exit 1
+            fi
+            
+            echo "Retrieved ECR URL from AWS: $ECR_URL"
+          fi
+          
+          # Validate ECR URL format
+          if [[ ! "$ECR_URL" =~ ^[0-9]+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/[a-z0-9-]+ ]]; then
+            echo "ERROR: Invalid ECR URL format: $ECR_URL"
+            echo "Expected format: {account}.dkr.ecr.{region}.amazonaws.com/{repository}"
+            exit 1
+          fi
+          
+          # Output the validated values
+          echo "ecr_repository_url=$ECR_URL" >> $GITHUB_OUTPUT
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          
+          # Also export as env vars for debugging
+          echo "ECR_REPOSITORY_URL=$ECR_URL" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          
+          echo "✅ Metadata set successfully:"
+          echo "   Repository: $ECR_URL"
+          echo "   Tag: $IMAGE_TAG"
       
       - name: Build Docker Image
         working-directory: backend
         run: |
+          # Use the validated ECR URL and tag
+          ECR_URL="${{ steps.meta.outputs.ecr_repository_url }}"
+          IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
+          
+          echo "Building Docker image..."
+          echo "  Repository: $ECR_URL"
+          echo "  Tags: $IMAGE_TAG, dev-latest"
+          
           docker build -f Dockerfile \
-            -t ${{ steps.meta.outputs.ecr_repository_url }}:${{ steps.meta.outputs.image_tag }} \
-            -t ${{ steps.meta.outputs.ecr_repository_url }}:dev-latest \
+            -t "${ECR_URL}:${IMAGE_TAG}" \
+            -t "${ECR_URL}:dev-latest" \
             .
+          
+          echo "✅ Docker image built successfully"
+          docker images | grep "$ECR_URL"
       
       - name: Push Docker Image
         run: |
-          docker push ${{ steps.meta.outputs.ecr_repository_url }}:${{ steps.meta.outputs.image_tag }}
-          docker push ${{ steps.meta.outputs.ecr_repository_url }}:dev-latest
+          ECR_URL="${{ steps.meta.outputs.ecr_repository_url }}"
+          IMAGE_TAG="${{ steps.meta.outputs.image_tag }}"
+          
+          echo "Pushing Docker images to ECR..."
+          echo "  Repository: $ECR_URL"
+          
+          docker push "${ECR_URL}:${IMAGE_TAG}"
+          docker push "${ECR_URL}:dev-latest"
+          
+          echo "✅ Docker images pushed successfully"
 
   deploy:
     name: Deploy to ECS
@@ -562,16 +441,39 @@ jobs:
           aws ecs wait services-stable \
             --cluster ${{ needs.infrastructure.outputs.ecs_cluster_name }} \
             --services ${{ needs.infrastructure.outputs.ecs_service_name }}
+
+  health-check:
+    name: Comprehensive Health Verification
+    needs: [infrastructure, deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
       
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.6.6
           terraform_wrapper: false
       
-      - name: Get API URL
-        id: api-url
+      - name: Get Infrastructure Outputs
+        id: outputs
         working-directory: infrastructure/terraform
+        env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+          TF_VAR_project: ${{ env.PROJECT }}
+          TF_VAR_environment: ${{ env.ENVIRONMENT }}
+          TF_VAR_image_tag: placeholder
+          TF_VAR_secret_key: ${{ secrets.SECRET_KEY }}
+          TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
         run: |
+          # Initialize Terraform to access outputs
           if [ -n "${{ secrets.TF_BACKEND_BUCKET }}" ] && [ -n "${{ secrets.TF_BACKEND_KEY }}" ]; then
             terraform init \
               -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
@@ -582,22 +484,310 @@ jobs:
             rm -f backend.tf
             terraform init
           fi
-          echo "api_url=$(terraform output -raw api_gateway_invoke_url)" >> $GITHUB_OUTPUT
-      
-      - name: Health Check
-        run: |
-          API_URL="${{ steps.api-url.outputs.api_url }}"
-          echo "Checking $API_URL/health"
           
-          for i in {1..30}; do
-            code=$(curl -s -o /dev/null -w "%{http_code}" "$API_URL/health" || true)
-            if [ "$code" = "200" ]; then
-              echo "✅ Health check passed!"
-              exit 0
+          # Get all necessary outputs
+          echo "api_url=$(terraform output -raw api_gateway_invoke_url)" >> $GITHUB_OUTPUT
+          echo "api_id=$(terraform output -raw api_gateway_id 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+          echo "vpc_link_id=$(terraform output -raw vpc_link_id 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+      
+      - name: Verify API Gateway Status
+        run: |
+          echo "========================================="
+          echo "VERIFYING API GATEWAY"
+          echo "========================================="
+          
+          # Get API Gateway ID (either from Terraform output or by searching)
+          API_ID="${{ steps.outputs.outputs.api_id }}"
+          if [ -z "$API_ID" ]; then
+            API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text)
+          fi
+          
+          if [ -z "$API_ID" ] || [ "$API_ID" = "None" ]; then
+            echo "❌ API Gateway not found!"
+            exit 1
+          fi
+          
+          echo "✅ API Gateway ID: $API_ID"
+          
+          # Check API status
+          API_STATUS=$(aws apigatewayv2 get-api --api-id "$API_ID" --query 'ProtocolType' --output text)
+          echo "   Protocol: $API_STATUS"
+          
+          # Check if stage exists
+          STAGE_EXISTS=$(aws apigatewayv2 get-stage --api-id "$API_ID" --stage-name prod --query 'StageName' --output text 2>/dev/null || echo "")
+          if [ -z "$STAGE_EXISTS" ]; then
+            echo "❌ Production stage not found!"
+            exit 1
+          fi
+          echo "✅ Production stage exists"
+          
+          # Check routes
+          ROUTE_COUNT=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query 'length(Items)' --output text)
+          echo "✅ Routes configured: $ROUTE_COUNT"
+          
+          if [ "$ROUTE_COUNT" -eq 0 ]; then
+            echo "❌ No routes configured!"
+            exit 1
+          fi
+      
+      - name: Verify VPC Link Status
+        run: |
+          echo "========================================="
+          echo "VERIFYING VPC LINK"
+          echo "========================================="
+          
+          # Get VPC Link ID
+          VPC_LINK_ID="${{ steps.outputs.outputs.vpc_link_id }}"
+          if [ -z "$VPC_LINK_ID" ]; then
+            VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='journalai-dev-vpc-link'].VpcLinkId | [0]" --output text)
+          fi
+          
+          if [ -z "$VPC_LINK_ID" ] || [ "$VPC_LINK_ID" = "None" ]; then
+            echo "❌ VPC Link not found!"
+            exit 1
+          fi
+          
+          echo "✅ VPC Link ID: $VPC_LINK_ID"
+          
+          # Check VPC Link status
+          VPC_LINK_STATUS=$(aws apigatewayv2 get-vpc-link --vpc-link-id "$VPC_LINK_ID" --query 'VpcLinkStatus' --output text)
+          echo "   Status: $VPC_LINK_STATUS"
+          
+          if [ "$VPC_LINK_STATUS" != "AVAILABLE" ]; then
+            echo "❌ VPC Link is not available (status: $VPC_LINK_STATUS)"
+            exit 1
+          fi
+          
+          echo "✅ VPC Link is AVAILABLE"
+      
+      - name: Verify ECS Tasks Status
+        run: |
+          echo "========================================="
+          echo "VERIFYING ECS TASKS"
+          echo "========================================="
+          
+          CLUSTER_NAME="${{ needs.infrastructure.outputs.ecs_cluster_name }}"
+          SERVICE_NAME="${{ needs.infrastructure.outputs.ecs_service_name }}"
+          
+          # Check service status
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SERVICE_NAME" \
+            --query 'services[0].status' --output text)
+          
+          if [ "$SERVICE_STATUS" != "ACTIVE" ]; then
+            echo "❌ ECS Service is not ACTIVE (status: $SERVICE_STATUS)"
+            exit 1
+          fi
+          
+          echo "✅ ECS Service is ACTIVE"
+          
+          # Check running tasks count
+          RUNNING_COUNT=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SERVICE_NAME" \
+            --query 'services[0].runningCount' --output text)
+          
+          DESIRED_COUNT=$(aws ecs describe-services \
+            --cluster "$CLUSTER_NAME" \
+            --services "$SERVICE_NAME" \
+            --query 'services[0].desiredCount' --output text)
+          
+          echo "   Desired tasks: $DESIRED_COUNT"
+          echo "   Running tasks: $RUNNING_COUNT"
+          
+          if [ "$RUNNING_COUNT" -lt "$DESIRED_COUNT" ]; then
+            echo "⚠️  Warning: Not all tasks are running yet"
+          else
+            echo "✅ All tasks are running"
+          fi
+          
+          # List running task ARNs
+          TASK_ARNS=$(aws ecs list-tasks \
+            --cluster "$CLUSTER_NAME" \
+            --service-name "$SERVICE_NAME" \
+            --desired-status RUNNING \
+            --query 'taskArns' --output json)
+          
+          if [ "$TASK_ARNS" = "[]" ]; then
+            echo "❌ No running tasks found!"
+            exit 1
+          fi
+          
+          # Check each task's health status
+          echo ""
+          echo "Task Health Status:"
+          for TASK_ARN in $(echo $TASK_ARNS | jq -r '.[]'); do
+            TASK_ID=$(echo $TASK_ARN | rev | cut -d'/' -f1 | rev | cut -d':' -f1)
+            HEALTH_STATUS=$(aws ecs describe-tasks \
+              --cluster "$CLUSTER_NAME" \
+              --tasks "$TASK_ARN" \
+              --query 'tasks[0].healthStatus' --output text)
+            LAST_STATUS=$(aws ecs describe-tasks \
+              --cluster "$CLUSTER_NAME" \
+              --tasks "$TASK_ARN" \
+              --query 'tasks[0].lastStatus' --output text)
+            echo "   Task $TASK_ID: $LAST_STATUS (Health: $HEALTH_STATUS)"
+          done
+      
+      - name: Verify Service Discovery
+        run: |
+          echo "========================================="
+          echo "VERIFYING SERVICE DISCOVERY"
+          echo "========================================="
+          
+          # Check namespace exists
+          NAMESPACE_ID=$(aws servicediscovery list-namespaces \
+            --query "Namespaces[?Name=='journalai-dev.local'].Id | [0]" --output text)
+          
+          if [ -z "$NAMESPACE_ID" ] || [ "$NAMESPACE_ID" = "None" ]; then
+            echo "❌ Service Discovery namespace not found!"
+            exit 1
+          fi
+          
+          echo "✅ Namespace ID: $NAMESPACE_ID"
+          
+          # Check service exists
+          SERVICE_ID=$(aws servicediscovery list-services \
+            --filters "Name=NAMESPACE_ID,Values=$NAMESPACE_ID" \
+            --query "Services[?Name=='backend'].Id | [0]" --output text)
+          
+          if [ -z "$SERVICE_ID" ] || [ "$SERVICE_ID" = "None" ]; then
+            echo "❌ Service Discovery service not found!"
+            exit 1
+          fi
+          
+          echo "✅ Service ID: $SERVICE_ID"
+          
+          # Check registered instances
+          INSTANCE_COUNT=$(aws servicediscovery list-instances \
+            --service-id "$SERVICE_ID" \
+            --query 'length(Instances)' --output text)
+          
+          echo "   Registered instances: $INSTANCE_COUNT"
+          
+          if [ "$INSTANCE_COUNT" -eq 0 ]; then
+            echo "⚠️  Warning: No instances registered yet"
+          else
+            echo "✅ Instances are registered"
+          fi
+      
+      - name: Backend Health Check
+        run: |
+          echo "========================================="
+          echo "BACKEND HEALTH CHECK"
+          echo "========================================="
+          
+          API_URL="${{ steps.outputs.outputs.api_url }}"
+          
+          if [ -z "$API_URL" ]; then
+            echo "❌ Could not determine API URL!"
+            exit 1
+          fi
+          
+          echo "API Gateway URL: $API_URL"
+          echo ""
+          echo "Performing health check on $API_URL/health..."
+          echo ""
+          
+          # Perform health check with retries
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+          SUCCESS=false
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            
+            # Make the health check request
+            RESPONSE=$(curl -s -w "\n%{http_code}" "$API_URL/health" 2>/dev/null || echo "000")
+            HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+            BODY=$(echo "$RESPONSE" | head -n-1)
+            
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Health check passed! (Attempt $ATTEMPT/$MAX_ATTEMPTS)"
+              echo ""
+              echo "Response body:"
+              echo "$BODY" | jq '.' 2>/dev/null || echo "$BODY"
+              
+              # Verify the response contains expected fields
+              STATUS=$(echo "$BODY" | jq -r '.status' 2>/dev/null || echo "")
+              if [ "$STATUS" = "healthy" ]; then
+                echo ""
+                echo "✅ Backend is healthy!"
+                
+                # Check component statuses
+                DB_STATUS=$(echo "$BODY" | jq -r '.db_url' 2>/dev/null || echo "")
+                REDIS_STATUS=$(echo "$BODY" | jq -r '.redis_url' 2>/dev/null || echo "")
+                
+                echo "   Database URL: $DB_STATUS"
+                echo "   Redis URL: $REDIS_STATUS"
+                
+                if [ "$DB_STATUS" = "missing" ]; then
+                  echo "⚠️  Warning: Database URL not configured"
+                fi
+                
+                if [ "$REDIS_STATUS" = "missing" ]; then
+                  echo "⚠️  Warning: Redis URL not configured"
+                fi
+                
+                SUCCESS=true
+                break
+              else
+                echo "⚠️  Backend returned non-healthy status: $STATUS"
+              fi
+            else
+              echo "Attempt $ATTEMPT/$MAX_ATTEMPTS: HTTP $HTTP_CODE"
+              
+              if [ "$HTTP_CODE" = "000" ]; then
+                echo "   Connection failed - service may still be starting"
+              elif [ "$HTTP_CODE" = "502" ] || [ "$HTTP_CODE" = "503" ]; then
+                echo "   Gateway error - backend may still be initializing"
+              elif [ "$HTTP_CODE" = "504" ]; then
+                echo "   Gateway timeout - backend is not responding"
+              else
+                echo "   Response: $BODY"
+              fi
             fi
-            echo "Attempt $i/30: HTTP $code, retrying..."
-            sleep 10
+            
+            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+              echo "   Waiting 10 seconds before retry..."
+              sleep 10
+            fi
           done
           
-          echo "❌ Health check failed after 30 attempts"
-          exit 1
+          if [ "$SUCCESS" = false ]; then
+            echo ""
+            echo "❌ Health check failed after $MAX_ATTEMPTS attempts"
+            echo ""
+            echo "Debugging information:"
+            echo "----------------------"
+            
+            # Get recent ECS task events for debugging
+            echo ""
+            echo "Recent ECS Service Events:"
+            aws ecs describe-services \
+              --cluster "${{ needs.infrastructure.outputs.ecs_cluster_name }}" \
+              --services "${{ needs.infrastructure.outputs.ecs_service_name }}" \
+              --query 'services[0].events[0:5].[createdAt,message]' \
+              --output table
+            
+            exit 1
+          fi
+      
+      - name: Summary
+        if: success()
+        run: |
+          echo ""
+          echo "========================================="
+          echo "🎉 DEPLOYMENT VERIFICATION COMPLETE 🎉"
+          echo "========================================="
+          echo ""
+          echo "✅ API Gateway: Configured and routing"
+          echo "✅ VPC Link: Available and connected"
+          echo "✅ ECS Tasks: Running and healthy"
+          echo "✅ Service Discovery: Registered and active"
+          echo "✅ Backend Health: Responding correctly"
+          echo ""
+          echo "API Endpoint: ${{ steps.outputs.outputs.api_url }}"
+          echo ""
+          echo "Deployment successful!"

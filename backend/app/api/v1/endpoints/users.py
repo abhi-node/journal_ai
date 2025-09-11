@@ -9,7 +9,7 @@ from app.schemas.user import User, UserGoals, UserUpdate
 from app.models.user import User as UserModel
 from app.api.v1.endpoints.auth import get_current_user
 from app.tasks.skill_tasks import generate_initial_skills_task, generate_additional_skills_task
-from app.services.review_scheduler import ReviewScheduler
+from app.services.daily_review_scheduler import daily_review_scheduler
 from pydantic import BaseModel
 import logging
 
@@ -194,21 +194,25 @@ def update_review_schedule(
         review_time = time(hour=hour, minute=minute)
         
         # Schedule or reschedule the review
-        task_id, next_review_utc = ReviewScheduler.schedule_or_reschedule_review(
-            db=db,
+        task_id = daily_review_scheduler.schedule_review(
             user_id=current_user.id,
             review_time=review_time,
             user_timezone=request.timezone
         )
         
-        logger.info(f"Updated review schedule for user {current_user.id}: task {task_id} at {next_review_utc}")
+        if not task_id:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to schedule review"
+            )
         
-        # next_review_utc is already an ISO string from the scheduler
+        logger.info(f"Updated review schedule for user {current_user.id}: task {task_id}")
+        
         return {
             "success": True,
             "task_id": task_id,
-            "next_review_utc": next_review_utc,
-            "time_utc": review_time.isoformat()
+            "time": review_time.isoformat(),
+            "timezone": request.timezone
         }
         
     except ValueError as e:
@@ -232,7 +236,7 @@ def disable_review_schedule(
     """
     Disable scheduled reviews for the current user.
     """
-    success = ReviewScheduler.cancel_scheduled_review(db, current_user.id)
+    success = daily_review_scheduler.cancel_scheduled_review(current_user.id)
     
     if success:
         return {"success": True, "message": "Review schedule disabled"}

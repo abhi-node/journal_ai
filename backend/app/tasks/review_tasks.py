@@ -19,7 +19,7 @@ from app.models.user import User
 from app.models.note import Note
 from app.models.review import Review, ReviewType
 from app.core.config import settings
-from app.services.task_manager import task_manager
+from app.services.daily_review_scheduler import daily_review_scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ class DatabaseTask(Task):
     bind=True,
     name="app.tasks.review_tasks.generate_daily_review",
     max_retries=3,
-    default_retry_delay=60,
+    default_retry_delay=600,
 )
 def generate_daily_review(
     self,
@@ -89,18 +89,14 @@ def generate_daily_review(
             tz = user_timezone or get_default_timezone()
             review_date = get_user_current_date(tz)
         
-        # CRITICAL: Check idempotency - has this review already been generated?
-        if task_manager.check_idempotency(user_uuid, review_date):
-            logger.info(f"Review already processed for user {user_id} on {review_date} (idempotency check)")
-            
-            # Still schedule next review to maintain the chain
-            task_manager.schedule_next_daily_review(user_uuid, user_timezone)
-            
-            return {
-                "status": "exists",
-                "message": "Daily review already exists for this date (idempotency)",
-                "date": review_date.isoformat()
-            }
+        # Check if review already exists in database (primary idempotency check)
+        existing_review = self.db.query(Review).filter(
+            and_(
+                Review.user_id == user_uuid,
+                Review.date == review_date,
+                Review.type == ReviewType.DAILY
+            )
+        ).first()
         
         # Get the user
         user = self.db.query(User).filter(User.id == user_uuid).first()
@@ -118,24 +114,10 @@ def generate_daily_review(
                 "message": "OpenAI service is not available"
             }
         
-        # Double-check if review already exists in database
-        existing_review = self.db.query(Review).filter(
-            and_(
-                Review.user_id == user_uuid,
-                Review.date == review_date,
-                Review.type == ReviewType.DAILY
-            )
-        ).first()
-        
         if existing_review:
             logger.info(f"Daily review already exists in database for user {user_id} on {review_date}")
             
-            # Set idempotency key to prevent future duplicates
-            task_manager.set_idempotency_key(user_uuid, review_date)
-            
-            # Schedule next review
-            task_manager.schedule_next_daily_review(user_uuid, user_timezone)
-            
+            # Do NOT reschedule - the successful execution already scheduled the next one
             return {
                 "status": "exists",
                 "message": "Daily review already exists in database",
@@ -155,7 +137,7 @@ def generate_daily_review(
             logger.warning(f"No notes found for user {user_id} on {review_date}")
             
             # Schedule for tomorrow since no content to review
-            task_manager.schedule_next_daily_review(user_uuid, user_timezone)
+            daily_review_scheduler.schedule_next_daily_review(user_uuid, user_timezone)
             
             return {
                 "status": "no_notes",
@@ -360,15 +342,12 @@ Only award XP to skills that were clearly practiced based on the journal entries
             self.db.commit()
             self.db.refresh(new_review)
             
-            # Set idempotency key to prevent future duplicates
-            task_manager.set_idempotency_key(user_uuid, review_date)
-            
             logger.info(f"Successfully generated daily review for user {user_id}")
             logger.info(f"Review score: {review_content['score']}")
             logger.info(f"XP awarded: {json.dumps(xp_earned)}")
             
             # Schedule next review for tomorrow
-            task_id = task_manager.schedule_next_daily_review(user_uuid, user_timezone)
+            task_id = daily_review_scheduler.schedule_next_daily_review(user_uuid, user_timezone)
             
             if task_id:
                 logger.info(f"Scheduled next review for user {user_id} (task: {task_id})")

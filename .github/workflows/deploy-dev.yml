@@ -576,11 +576,11 @@ jobs:
           echo ""
           
           # Update images for all containers that use the backend image
-          # This updates backend, celery_worker, and celery_beat containers by name
+          # This updates backend and celery_worker containers by name
           echo "Updating container images..."
           NEW_TASK_DEF=$(echo "$TASK_DEFINITION" | jq --arg IMAGE "$FULL_IMAGE" '
             .containerDefinitions |= map(
-              if .name == "backend" or .name == "celery_worker" or .name == "celery_beat" 
+              if .name == "backend" or .name == "celery_worker" 
               then .image = $IMAGE 
               else . 
               end
@@ -672,22 +672,83 @@ jobs:
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
           TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
         run: |
+          echo "========================================="
+          echo "RETRIEVING INFRASTRUCTURE OUTPUTS"
+          echo "========================================="
+          
           # Initialize Terraform to access outputs
           if [ -n "${{ secrets.TF_BACKEND_BUCKET }}" ] && [ -n "${{ secrets.TF_BACKEND_KEY }}" ]; then
+            echo "Initializing with S3 backend..."
             terraform init \
               -backend-config="bucket=${{ secrets.TF_BACKEND_BUCKET }}" \
               -backend-config="key=${{ secrets.TF_BACKEND_KEY }}" \
               -backend-config="region=${{ secrets.TF_BACKEND_REGION || env.AWS_REGION }}" \
-              -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}"
+              -backend-config="dynamodb_table=${{ secrets.TF_BACKEND_DYNAMODB_TABLE }}" \
+              -reconfigure
           else
+            echo "Initializing with local backend..."
             rm -f backend.tf
             terraform init
           fi
           
-          # Get all necessary outputs
-          echo "api_url=$(terraform output -raw api_gateway_invoke_url)" >> $GITHUB_OUTPUT
-          echo "api_id=$(terraform output -raw api_gateway_id 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
-          echo "vpc_link_id=$(terraform output -raw vpc_link_id 2>/dev/null || echo '')" >> $GITHUB_OUTPUT
+          # Try to get outputs from Terraform
+          echo ""
+          echo "Attempting to get Terraform outputs..."
+          
+          # Get API URL
+          API_URL=$(terraform output -raw api_gateway_invoke_url 2>/dev/null || echo "")
+          if [ -z "$API_URL" ] || [[ "$API_URL" == *"No outputs found"* ]]; then
+            echo "Terraform output not available, constructing API URL..."
+            API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text)
+            if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
+              API_URL="https://${API_ID}.execute-api.${{ env.AWS_REGION }}.amazonaws.com/prod"
+            fi
+          fi
+          
+          # Get API ID
+          API_ID=$(terraform output -raw api_gateway_id 2>/dev/null || echo "")
+          if [ -z "$API_ID" ] || [[ "$API_ID" == *"No outputs found"* ]]; then
+            echo "Getting API ID from AWS..."
+            API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text)
+          fi
+          
+          # Get VPC Link ID
+          VPC_LINK_ID=$(terraform output -raw vpc_link_id 2>/dev/null || echo "")
+          if [ -z "$VPC_LINK_ID" ] || [[ "$VPC_LINK_ID" == *"No outputs found"* ]]; then
+            echo "Getting VPC Link ID from AWS..."
+            VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='journalai-dev-vpc-link'].VpcLinkId | [0]" --output text)
+          fi
+          
+          # Validate and output
+          if [ -z "$API_URL" ] || [ "$API_URL" = "None" ]; then
+            echo "Warning: Could not determine API URL"
+            API_URL=""
+          else
+            echo "✅ API URL: $API_URL"
+          fi
+          
+          if [ -z "$API_ID" ] || [ "$API_ID" = "None" ]; then
+            echo "Warning: Could not determine API ID"
+            API_ID=""
+          else
+            echo "✅ API ID: $API_ID"
+          fi
+          
+          if [ -z "$VPC_LINK_ID" ] || [ "$VPC_LINK_ID" = "None" ]; then
+            echo "Warning: Could not determine VPC Link ID"
+            VPC_LINK_ID=""
+          else
+            echo "✅ VPC Link ID: $VPC_LINK_ID"
+          fi
+          
+          # Set outputs
+          echo "api_url=$API_URL" >> $GITHUB_OUTPUT
+          echo "api_id=$API_ID" >> $GITHUB_OUTPUT
+          echo "vpc_link_id=$VPC_LINK_ID" >> $GITHUB_OUTPUT
+          
+          echo ""
+          echo "Outputs set to GitHub:"
+          cat $GITHUB_OUTPUT
       
       - name: Verify API Gateway Status
         run: |
@@ -879,9 +940,17 @@ jobs:
           
           API_URL="${{ steps.outputs.outputs.api_url }}"
           
+          # Fallback: If API URL is not available from outputs, construct it
           if [ -z "$API_URL" ]; then
-            echo "❌ Could not determine API URL!"
-            exit 1
+            echo "API URL not available from outputs, constructing from AWS..."
+            API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text)
+            if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
+              API_URL="https://${API_ID}.execute-api.${{ env.AWS_REGION }}.amazonaws.com/prod"
+              echo "Constructed API URL: $API_URL"
+            else
+              echo "❌ Could not determine API URL!"
+              exit 1
+            fi
           fi
           
           echo "API Gateway URL: $API_URL"

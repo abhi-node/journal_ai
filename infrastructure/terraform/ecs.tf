@@ -152,56 +152,6 @@ resource "aws_ecs_task_definition" "backend" {
           condition     = "START"
         }
       ]
-    },
-    {
-      name      = "celery_beat"
-      image     = local.image_uri
-      essential = false
-      command   = ["sh", "-c", "celery -A app.core.celery_app beat --loglevel=info"]
-      environment = [
-        {
-          name  = "ENVIRONMENT"
-          value = var.environment
-        },
-        {
-          name  = "SECRET_KEY"
-          value = var.secret_key
-        },
-        {
-          name  = "OPENAI_API_KEY"
-          value = var.openai_api_key
-        },
-        {
-          name  = "DATABASE_URL"
-          value = local.database_url
-        },
-        {
-          name  = "REDIS_URL"
-          value = local.redis_url
-        },
-        {
-          name  = "PYTHONPATH"
-          value = "/app"
-        }
-      ]
-      logConfiguration = {
-        logDriver = "awslogs"
-        options = {
-          awslogs-group         = aws_cloudwatch_log_group.ecs.name
-          awslogs-region        = var.aws_region
-          awslogs-stream-prefix = "ecs"
-        }
-      }
-      dependsOn = [
-        {
-          containerName = "redis"
-          condition     = "START"
-        },
-        {
-          containerName = "celery_worker"
-          condition     = "START"
-        }
-      ]
     }
   ])
 }

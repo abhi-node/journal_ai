@@ -82,28 +82,6 @@ services:
     networks:
       - journalai_network
 
-  celery_beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: journalai_celery_beat
-    command: celery -A app.core.celery_app beat --loglevel=info
-    volumes:
-      - ./backend:/app
-    depends_on:
-      - redis
-      - postgres
-      - backend
-      - celery_worker
-    environment:
-      DATABASE_URL: postgresql://journalai:journalai@postgres:5432/journalai
-      REDIS_URL: redis://redis:6379/0
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      SECRET_KEY: ${SECRET_KEY:-your-secret-key-here-change-in-production}
-      PYTHONPATH: /app
-    networks:
-      - journalai_network
-
 volumes:
   postgres_data:
 

@@ -23,8 +23,8 @@ celery_app.conf.update(
     
     # Task execution settings
     task_track_started=True,
-    task_time_limit=300,  # 5 minutes hard limit
-    task_soft_time_limit=240,  # 4 minutes soft limit
+    task_time_limit=600,  # 10 minutes hard limit for LLM calls
+    task_soft_time_limit=540,  # 9 minutes soft limit
     
     # Retry settings
     task_acks_late=True,
@@ -36,18 +36,6 @@ celery_app.conf.update(
     # Worker settings
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
-    
-    # Beat scheduler configuration for Redis
-    beat_scheduler='redbeat.RedBeatScheduler',
-    redbeat_redis_url=settings.REDIS_URL,
-    # Ensure Beat wakes up frequently enough to extend the Redis lock
-    beat_max_loop_interval=30.0,
-    # RedBeat lock settings to avoid LockNotOwnedError due to TTL expiry
-    redbeat_lock_timeout=120.0,
-    redbeat_lock_key='redbeat:journalai:lock',
-    redbeat_key_prefix='redbeat:journalai:',
-    # Beat schedule lock to prevent multiple beat instances
-    beat_schedule_filename=None,  # Don't use file-based schedule
     
     # Redis settings for better task management
     broker_transport_options={

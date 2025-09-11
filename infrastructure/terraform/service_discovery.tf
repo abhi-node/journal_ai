@@ -3,6 +3,10 @@ resource "aws_service_discovery_private_dns_namespace" "this" {
   name        = "${var.project}-${var.environment}.local"
   description = "Private namespace for ${var.project} ${var.environment}"
   vpc         = data.aws_vpc.default.id
+  
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 # Service Discovery service - fully managed by Terraform
@@ -28,6 +32,10 @@ resource "aws_service_discovery_service" "backend" {
 
   # ECS handles health checks automatically
   # No health_check_custom_config needed
+  
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 output "service_discovery_arn" {

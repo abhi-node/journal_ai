@@ -22,10 +22,14 @@ resource "aws_apigatewayv2_integration" "backend" {
   connection_id          = aws_apigatewayv2_vpc_link.this.id
   integration_method     = "ANY"
   payload_format_version = "1.0"
-  # Use HTTP URL format for Service Discovery endpoint
-  # Format: http://{service-name}.{namespace}:{port}
-  integration_uri      = "http://backend.${var.project}-${var.environment}.local:8000"
+  # Must use Service Discovery ARN for VPC_LINK integrations
+  integration_uri      = aws_service_discovery_service.backend.arn
   timeout_milliseconds = 30000
+  
+  # Add request parameters to properly route to the service
+  request_parameters = {
+    "overwrite:path" = "$request.path"
+  }
 }
 
 resource "aws_apigatewayv2_route" "root" {

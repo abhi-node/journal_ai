@@ -254,129 +254,130 @@ jobs:
             terraform init
           fi
       
-      - name: Import ALL Existing Resources
-        working-directory: infrastructure/terraform
-        env:
-          TF_VAR_aws_region: ${{ env.AWS_REGION }}
-          TF_VAR_project: ${{ env.PROJECT }}
-          TF_VAR_environment: ${{ env.ENVIRONMENT }}
-          TF_VAR_image_tag: placeholder
-          TF_VAR_secret_key: ${{ secrets.SECRET_KEY }}
-          TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
-          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
-          TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
-        run: |
-          set +e  # Continue on errors (resources might not exist)
-          
-          VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
-          echo "VPC ID for imports: $VPC_ID"
-          
-          # Import ECR Repository
-          echo "Importing ECR..."
-          terraform import aws_ecr_repository.backend journalai-dev-backend 2>/dev/null || true
-          
-          # Import ECS Resources
-          echo "Importing ECS resources..."
-          terraform import aws_ecs_cluster.this journalai-dev-cluster 2>/dev/null || true
-          terraform import aws_ecs_service.backend journalai-dev-cluster/journalai-dev-service 2>/dev/null || true
-          
-          # Import CloudWatch Logs
-          echo "Importing CloudWatch logs..."
-          terraform import aws_cloudwatch_log_group.ecs /ecs/journalai-dev-service 2>/dev/null || true
-          
-          # Import IAM Role
-          echo "Importing IAM role..."
-          terraform import aws_iam_role.ecs_task_execution_role journalai-dev-ecsTaskExecutionRole 2>/dev/null || true
-          terraform import aws_iam_role_policy_attachment.ecs_task_execution journalai-dev-ecsTaskExecutionRole/arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy 2>/dev/null || true
-          
-          # Import RDS Resources
-          echo "Importing RDS resources..."
-          terraform import aws_db_instance.postgres journalai-dev-db 2>/dev/null || true
-          terraform import aws_db_subnet_group.db journalai-dev-db-subnets 2>/dev/null || true
-          
-          # Import Service Discovery
-          echo "Importing Service Discovery..."
-          NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='journalai-dev.local'].Id | [0]" --output text 2>/dev/null)
-          if [ -n "$NAMESPACE_ID" ] && [ "$NAMESPACE_ID" != "None" ]; then
-            echo "Importing namespace: $NAMESPACE_ID"
-            terraform import aws_service_discovery_private_dns_namespace.this "${NAMESPACE_ID}:${VPC_ID}" 2>/dev/null || true
-            SERVICE_ID=$(aws servicediscovery list-services --filters "Name=NAMESPACE_ID,Values=$NAMESPACE_ID" --query "Services[?Name=='backend'].Id | [0]" --output text 2>/dev/null)
-            if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "None" ]; then
-              echo "Importing service: $SERVICE_ID"
-              terraform import aws_service_discovery_service.backend "$SERVICE_ID" 2>/dev/null || true
-            fi
-          fi
-          
-          # CRITICAL: Import Security Groups with correct resource names
-          echo "Importing Security Groups..."
-          
-          # Import ecs_tasks security group
-          SG_ID=$(aws ec2 describe-security-groups \
-            --filters "Name=group-name,Values=journalai-dev-ecs-tasks-sg" "Name=vpc-id,Values=$VPC_ID" \
-            --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
-          if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
-            echo "Importing ecs_tasks security group: $SG_ID"
-            terraform import aws_security_group.ecs_tasks "$SG_ID" 2>/dev/null || true
-          fi
-          
-          # Import vpc_link security group
-          SG_ID=$(aws ec2 describe-security-groups \
-            --filters "Name=group-name,Values=journalai-dev-apigw-vpc-link-sg" "Name=vpc-id,Values=$VPC_ID" \
-            --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
-          if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
-            echo "Importing vpc_link security group: $SG_ID"
-            terraform import aws_security_group.vpc_link "$SG_ID" 2>/dev/null || true
-          fi
-          
-          # Import rds security group
-          SG_ID=$(aws ec2 describe-security-groups \
-            --filters "Name=group-name,Values=journalai-dev-rds-sg" "Name=vpc-id,Values=$VPC_ID" \
-            --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
-          if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
-            echo "Importing rds security group: $SG_ID"
-            terraform import aws_security_group.rds "$SG_ID" 2>/dev/null || true
-          fi
-          
-          # Import API Gateway Resources
-          echo "Importing API Gateway resources..."
-          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text 2>/dev/null)
-          if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
-            echo "Importing API: $API_ID"
-            terraform import aws_apigatewayv2_api.http_api "$API_ID" 2>/dev/null || true
-            terraform import aws_apigatewayv2_stage.prod "${API_ID}/prod" 2>/dev/null || true
-            
-            VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='journalai-dev-vpc-link'].VpcLinkId | [0]" --output text 2>/dev/null)
-            if [ -n "$VPC_LINK_ID" ] && [ "$VPC_LINK_ID" != "None" ]; then
-              echo "Importing VPC Link: $VPC_LINK_ID"
-              terraform import aws_apigatewayv2_vpc_link.this "$VPC_LINK_ID" 2>/dev/null || true
-            fi
-            
-            INT_ID=$(aws apigatewayv2 get-integrations --api-id "$API_ID" --query "Items[0].IntegrationId" --output text 2>/dev/null)
-            if [ -n "$INT_ID" ] && [ "$INT_ID" != "None" ]; then
-              echo "Importing integration: $INT_ID"
-              terraform import aws_apigatewayv2_integration.backend "${API_ID}/${INT_ID}" 2>/dev/null || true
-            fi
-            
-            # Import routes - CRITICAL: Must check for each route individually
-            echo "Importing API routes..."
-            
-            # Import root route
-            ROOT_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /'].RouteId | [0]" --output text 2>/dev/null)
-            if [ -n "$ROOT_ROUTE_ID" ] && [ "$ROOT_ROUTE_ID" != "None" ]; then
-              echo "Importing root route: $ROOT_ROUTE_ID"
-              terraform import aws_apigatewayv2_route.root "${API_ID}/${ROOT_ROUTE_ID}" 2>/dev/null || echo "  Failed to import root route (may already be in state)"
-            fi
-            
-            # Import proxy route - FIX: Use correct variable name
-            PROXY_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /{proxy+}'].RouteId | [0]" --output text 2>/dev/null)
-            if [ -n "$PROXY_ROUTE_ID" ] && [ "$PROXY_ROUTE_ID" != "None" ]; then
-              echo "Importing proxy route: $PROXY_ROUTE_ID"
-              terraform import aws_apigatewayv2_route.proxy "${API_ID}/${PROXY_ROUTE_ID}" 2>/dev/null || echo "  Failed to import proxy route (may already be in state)"
-            fi
-          fi
-          
-          echo "Import complete - showing state list:"
-          terraform state list || echo "No state file yet"
+      # TEMPORARILY DISABLED - Re-enable after destroy step runs successfully
+      # - name: Import ALL Existing Resources
+      #   working-directory: infrastructure/terraform
+      #   env:
+      #     TF_VAR_aws_region: ${{ env.AWS_REGION }}
+      #     TF_VAR_project: ${{ env.PROJECT }}
+      #     TF_VAR_environment: ${{ env.ENVIRONMENT }}
+      #     TF_VAR_image_tag: placeholder
+      #     TF_VAR_secret_key: ${{ secrets.SECRET_KEY }}
+      #     TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+      #     TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+      #     TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
+      #   run: |
+      #     set +e  # Continue on errors (resources might not exist)
+      #     
+      #     VPC_ID=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[0].VpcId' --output text)
+      #     echo "VPC ID for imports: $VPC_ID"
+      #     
+      #     # Import ECR Repository
+      #     echo "Importing ECR..."
+      #     terraform import aws_ecr_repository.backend journalai-dev-backend 2>/dev/null || true
+      #     
+      #     # Import ECS Resources
+      #     echo "Importing ECS resources..."
+      #     terraform import aws_ecs_cluster.this journalai-dev-cluster 2>/dev/null || true
+      #     terraform import aws_ecs_service.backend journalai-dev-cluster/journalai-dev-service 2>/dev/null || true
+      #     
+      #     # Import CloudWatch Logs
+      #     echo "Importing CloudWatch logs..."
+      #     terraform import aws_cloudwatch_log_group.ecs /ecs/journalai-dev-service 2>/dev/null || true
+      #     
+      #     # Import IAM Role
+      #     echo "Importing IAM role..."
+      #     terraform import aws_iam_role.ecs_task_execution_role journalai-dev-ecsTaskExecutionRole 2>/dev/null || true
+      #     terraform import aws_iam_role_policy_attachment.ecs_task_execution journalai-dev-ecsTaskExecutionRole/arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy 2>/dev/null || true
+      #     
+      #     # Import RDS Resources
+      #     echo "Importing RDS resources..."
+      #     terraform import aws_db_instance.postgres journalai-dev-db 2>/dev/null || true
+      #     terraform import aws_db_subnet_group.db journalai-dev-db-subnets 2>/dev/null || true
+      #     
+      #     # Import Service Discovery
+      #     echo "Importing Service Discovery..."
+      #     NAMESPACE_ID=$(aws servicediscovery list-namespaces --query "Namespaces[?Name=='journalai-dev.local'].Id | [0]" --output text 2>/dev/null)
+      #     if [ -n "$NAMESPACE_ID" ] && [ "$NAMESPACE_ID" != "None" ]; then
+      #       echo "Importing namespace: $NAMESPACE_ID"
+      #       terraform import aws_service_discovery_private_dns_namespace.this "${NAMESPACE_ID}:${VPC_ID}" 2>/dev/null || true
+      #       SERVICE_ID=$(aws servicediscovery list-services --filters "Name=NAMESPACE_ID,Values=$NAMESPACE_ID" --query "Services[?Name=='backend'].Id | [0]" --output text 2>/dev/null)
+      #       if [ -n "$SERVICE_ID" ] && [ "$SERVICE_ID" != "None" ]; then
+      #         echo "Importing service: $SERVICE_ID"
+      #         terraform import aws_service_discovery_service.backend "$SERVICE_ID" 2>/dev/null || true
+      #       fi
+      #     fi
+      #     
+      #     # CRITICAL: Import Security Groups with correct resource names
+      #     echo "Importing Security Groups..."
+      #     
+      #     # Import ecs_tasks security group
+      #     SG_ID=$(aws ec2 describe-security-groups \
+      #       --filters "Name=group-name,Values=journalai-dev-ecs-tasks-sg" "Name=vpc-id,Values=$VPC_ID" \
+      #       --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+      #     if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+      #       echo "Importing ecs_tasks security group: $SG_ID"
+      #       terraform import aws_security_group.ecs_tasks "$SG_ID" 2>/dev/null || true
+      #     fi
+      #     
+      #     # Import vpc_link security group
+      #     SG_ID=$(aws ec2 describe-security-groups \
+      #       --filters "Name=group-name,Values=journalai-dev-apigw-vpc-link-sg" "Name=vpc-id,Values=$VPC_ID" \
+      #       --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+      #     if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+      #       echo "Importing vpc_link security group: $SG_ID"
+      #       terraform import aws_security_group.vpc_link "$SG_ID" 2>/dev/null || true
+      #     fi
+      #     
+      #     # Import rds security group
+      #     SG_ID=$(aws ec2 describe-security-groups \
+      #       --filters "Name=group-name,Values=journalai-dev-rds-sg" "Name=vpc-id,Values=$VPC_ID" \
+      #       --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null)
+      #     if [ -n "$SG_ID" ] && [ "$SG_ID" != "None" ]; then
+      #       echo "Importing rds security group: $SG_ID"
+      #       terraform import aws_security_group.rds "$SG_ID" 2>/dev/null || true
+      #     fi
+      #     
+      #     # Import API Gateway Resources
+      #     echo "Importing API Gateway resources..."
+      #     API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text 2>/dev/null)
+      #     if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
+      #       echo "Importing API: $API_ID"
+      #       terraform import aws_apigatewayv2_api.http_api "$API_ID" 2>/dev/null || true
+      #       terraform import aws_apigatewayv2_stage.prod "${API_ID}/prod" 2>/dev/null || true
+      #       
+      #       VPC_LINK_ID=$(aws apigatewayv2 get-vpc-links --query "Items[?Name=='journalai-dev-vpc-link'].VpcLinkId | [0]" --output text 2>/dev/null)
+      #       if [ -n "$VPC_LINK_ID" ] && [ "$VPC_LINK_ID" != "None" ]; then
+      #         echo "Importing VPC Link: $VPC_LINK_ID"
+      #         terraform import aws_apigatewayv2_vpc_link.this "$VPC_LINK_ID" 2>/dev/null || true
+      #       fi
+      #       
+      #       INT_ID=$(aws apigatewayv2 get-integrations --api-id "$API_ID" --query "Items[0].IntegrationId" --output text 2>/dev/null)
+      #       if [ -n "$INT_ID" ] && [ "$INT_ID" != "None" ]; then
+      #         echo "Importing integration: $INT_ID"
+      #         terraform import aws_apigatewayv2_integration.backend "${API_ID}/${INT_ID}" 2>/dev/null || true
+      #       fi
+      #       
+      #       # Import routes - CRITICAL: Must check for each route individually
+      #       echo "Importing API routes..."
+      #       
+      #       # Import root route
+      #       ROOT_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /'].RouteId | [0]" --output text 2>/dev/null)
+      #       if [ -n "$ROOT_ROUTE_ID" ] && [ "$ROOT_ROUTE_ID" != "None" ]; then
+      #         echo "Importing root route: $ROOT_ROUTE_ID"
+      #         terraform import aws_apigatewayv2_route.root "${API_ID}/${ROOT_ROUTE_ID}" 2>/dev/null || echo "  Failed to import root route (may already be in state)"
+      #       fi
+      #       
+      #       # Import proxy route - FIX: Use correct variable name
+      #       PROXY_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /{proxy+}'].RouteId | [0]" --output text 2>/dev/null)
+      #       if [ -n "$PROXY_ROUTE_ID" ] && [ "$PROXY_ROUTE_ID" != "None" ]; then
+      #         echo "Importing proxy route: $PROXY_ROUTE_ID"
+      #         terraform import aws_apigatewayv2_route.proxy "${API_ID}/${PROXY_ROUTE_ID}" 2>/dev/null || echo "  Failed to import proxy route (may already be in state)"
+      #       fi
+      #     fi
+      #     
+      #     echo "Import complete - showing state list:"
+      #     terraform state list || echo "No state file yet"
       
       # TEMPORARILY DISABLED - Re-enable after destroy step runs successfully
       # - name: Validate Imports

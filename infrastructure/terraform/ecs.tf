@@ -170,8 +170,9 @@ resource "aws_ecs_service" "backend" {
   }
 
   service_registries {
-    registry_arn = aws_service_discovery_service.backend.arn
-    port         = 8000
+    registry_arn   = aws_service_discovery_service.backend.arn
+    container_name = "backend"
+    container_port = 8000
   }
 
   lifecycle {

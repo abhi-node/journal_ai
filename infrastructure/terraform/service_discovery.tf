@@ -16,6 +16,12 @@ resource "aws_service_discovery_service" "backend" {
       ttl  = 10
       type = "A"
     }
+    
+    # Add SRV record to include port information
+    dns_records {
+      ttl  = 10
+      type = "SRV"
+    }
 
     routing_policy = "MULTIVALUE"
   }

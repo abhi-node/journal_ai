@@ -22,14 +22,10 @@ resource "aws_apigatewayv2_integration" "backend" {
   connection_id          = aws_apigatewayv2_vpc_link.this.id
   integration_method     = "ANY"
   payload_format_version = "1.0"
-  # Must use Service Discovery ARN for VPC_LINK integrations
+  # For Service Discovery, must use ARN format but API Gateway will resolve to the DNS name
+  # The service must have port mapping in task definition
   integration_uri      = aws_service_discovery_service.backend.arn
   timeout_milliseconds = 30000
-  
-  # Add request parameters to properly route to the service
-  request_parameters = {
-    "overwrite:path" = "$request.path"
-  }
 }
 
 resource "aws_apigatewayv2_route" "root" {

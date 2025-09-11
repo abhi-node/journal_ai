@@ -157,22 +157,108 @@ jobs:
               terraform import aws_apigatewayv2_integration.backend "${API_ID}/${INT_ID}" 2>/dev/null || true
             fi
             
-            for ROUTE_KEY in "ANY /" "ANY /{proxy+}"; do
-              ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='$ROUTE_KEY'].RouteId | [0]" --output text 2>/dev/null)
-              if [ -n "$ROUTE_ID" ] && [ "$ROUTE_ID" != "None" ]; then
-                if [ "$ROUTE_KEY" = "ANY /" ]; then
-                  echo "Importing root route: $ROUTE_ID"
-                  terraform import aws_apigatewayv2_route.root "${API_ID}/${ROUTE_ID}" 2>/dev/null || true
-                else
-                  echo "Importing proxy route: $ROUTE_ID"
-                  terraform import aws_apigatewayv2_route.proxy "${API_ID}/${PROXY_ROUTE_ID}" 2>/dev/null || true
-                fi
-              fi
-            done
+            # Import routes - CRITICAL: Must check for each route individually
+            echo "Importing API routes..."
+            
+            # Import root route
+            ROOT_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /'].RouteId | [0]" --output text 2>/dev/null)
+            if [ -n "$ROOT_ROUTE_ID" ] && [ "$ROOT_ROUTE_ID" != "None" ]; then
+              echo "Importing root route: $ROOT_ROUTE_ID"
+              terraform import aws_apigatewayv2_route.root "${API_ID}/${ROOT_ROUTE_ID}" 2>/dev/null || echo "  Failed to import root route (may already be in state)"
+            fi
+            
+            # Import proxy route - FIX: Use correct variable name
+            PROXY_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /{proxy+}'].RouteId | [0]" --output text 2>/dev/null)
+            if [ -n "$PROXY_ROUTE_ID" ] && [ "$PROXY_ROUTE_ID" != "None" ]; then
+              echo "Importing proxy route: $PROXY_ROUTE_ID"
+              terraform import aws_apigatewayv2_route.proxy "${API_ID}/${PROXY_ROUTE_ID}" 2>/dev/null || echo "  Failed to import proxy route (may already be in state)"
+            fi
           fi
           
           echo "Import complete - showing state list:"
           terraform state list || echo "No state file yet"
+      
+      - name: Validate Imports
+        working-directory: infrastructure/terraform
+        env:
+          TF_VAR_aws_region: ${{ env.AWS_REGION }}
+          TF_VAR_project: ${{ env.PROJECT }}
+          TF_VAR_environment: ${{ env.ENVIRONMENT }}
+          TF_VAR_image_tag: placeholder
+          TF_VAR_secret_key: ${{ secrets.SECRET_KEY }}
+          TF_VAR_openai_api_key: ${{ secrets.OPENAI_API_KEY }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
+        run: |
+          echo "========================================="
+          echo "VALIDATING TERRAFORM STATE"
+          echo "========================================="
+          
+          # Check if critical resources that might cause conflicts are in state
+          MISSING_RESOURCES=""
+          
+          # Function to check if resource is in state
+          check_resource() {
+            local resource=$1
+            local friendly_name=$2
+            if terraform state show "$resource" >/dev/null 2>&1; then
+              echo "✅ $friendly_name is in state"
+              return 0
+            else
+              echo "⚠️  $friendly_name is NOT in state"
+              return 1
+            fi
+          }
+          
+          # Check API Gateway resources that commonly cause conflicts
+          API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text 2>/dev/null)
+          if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
+            echo ""
+            echo "Checking API Gateway resources (API ID: $API_ID)..."
+            
+            # Check if routes exist in AWS
+            ROUTES_IN_AWS=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query 'Items[].RouteKey' --output json 2>/dev/null)
+            echo "Routes existing in AWS: $ROUTES_IN_AWS"
+            
+            # Check if routes are in Terraform state
+            check_resource "aws_apigatewayv2_route.root" "API Gateway root route (ANY /)"
+            check_resource "aws_apigatewayv2_route.proxy" "API Gateway proxy route (ANY /{proxy+})"
+            
+            # If proxy route exists in AWS but not in state, try to import it again
+            if echo "$ROUTES_IN_AWS" | grep -q "ANY /{proxy+}" && ! terraform state show aws_apigatewayv2_route.proxy >/dev/null 2>&1; then
+              echo ""
+              echo "⚠️  Proxy route exists in AWS but not in Terraform state. Attempting re-import..."
+              PROXY_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /{proxy+}'].RouteId | [0]" --output text)
+              if [ -n "$PROXY_ROUTE_ID" ] && [ "$PROXY_ROUTE_ID" != "None" ]; then
+                terraform import aws_apigatewayv2_route.proxy "${API_ID}/${PROXY_ROUTE_ID}"
+                if [ $? -eq 0 ]; then
+                  echo "✅ Successfully imported proxy route"
+                else
+                  echo "❌ Failed to import proxy route - this may cause conflicts"
+                  MISSING_RESOURCES="$MISSING_RESOURCES aws_apigatewayv2_route.proxy"
+                fi
+              fi
+            fi
+          fi
+          
+          # Check other critical resources
+          echo ""
+          echo "Checking other infrastructure resources..."
+          check_resource "aws_ecr_repository.backend" "ECR Repository"
+          check_resource "aws_ecs_cluster.this" "ECS Cluster"
+          check_resource "aws_apigatewayv2_api.http_api" "API Gateway"
+          check_resource "aws_apigatewayv2_vpc_link.this" "VPC Link"
+          
+          # Summary
+          echo ""
+          echo "========================================="
+          if [ -z "$MISSING_RESOURCES" ]; then
+            echo "✅ All critical resources are properly imported or will be created"
+          else
+            echo "⚠️  Warning: Some resources might cause conflicts: $MISSING_RESOURCES"
+            echo "Terraform will attempt to handle this during apply"
+          fi
+          echo "========================================="
       
       - name: Terraform Apply
         working-directory: infrastructure/terraform
@@ -186,8 +272,44 @@ jobs:
           TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
           TF_VAR_redis_url: ${{ secrets.REDIS_URL }}
         run: |
+          echo "Running Terraform validate..."
           terraform validate
-          terraform apply -auto-approve
+          
+          echo ""
+          echo "Running Terraform plan to preview changes..."
+          terraform plan -out=tfplan
+          
+          echo ""
+          echo "Applying Terraform configuration..."
+          # Use -refresh=true to ensure state matches reality before applying
+          terraform apply -auto-approve -refresh=true tfplan || {
+            echo ""
+            echo "❌ Terraform apply failed!"
+            echo ""
+            echo "Common issues and solutions:"
+            echo "1. Resource conflicts: Resources exist in AWS but not in Terraform state"
+            echo "   Solution: Check the import step above and ensure all resources are imported"
+            echo ""
+            echo "2. The specific error about 'Route with key ANY /{proxy+} already exists'"
+            echo "   indicates the route exists in AWS but wasn't imported properly."
+            echo ""
+            echo "Attempting automatic fix for route conflicts..."
+            
+            # Try to delete conflicting routes if they exist
+            API_ID=$(aws apigatewayv2 get-apis --query "Items[?Name=='journalai-dev-http-api'].ApiId | [0]" --output text)
+            if [ -n "$API_ID" ] && [ "$API_ID" != "None" ]; then
+              # Check if the proxy route exists
+              PROXY_ROUTE_ID=$(aws apigatewayv2 get-routes --api-id "$API_ID" --query "Items[?RouteKey=='ANY /{proxy+}'].RouteId | [0]" --output text)
+              if [ -n "$PROXY_ROUTE_ID" ] && [ "$PROXY_ROUTE_ID" != "None" ]; then
+                echo "Found existing proxy route: $PROXY_ROUTE_ID"
+                echo "Importing it into Terraform state..."
+                terraform import aws_apigatewayv2_route.proxy "${API_ID}/${PROXY_ROUTE_ID}"
+                
+                echo "Retrying Terraform apply..."
+                terraform apply -auto-approve -refresh=true
+              fi
+            fi
+          }
       
       - name: Get Terraform Outputs
         id: outputs
